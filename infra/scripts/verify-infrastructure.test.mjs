@@ -39,6 +39,7 @@ test('full provisioning and verification share one resource template', () => {
   assert.match(main, /module resources '\.\/resources\.bicep'/);
   assert.match(main, /dependsOn: \[resources\]/);
   assert.match(workflow, /--file infra\/resources\.bicep/);
+  assert.match(workflow, /--result-format FullResourcePayloads\s/);
   assert.ok(!workflow.includes('deployment group create'));
   assert.ok(!workflow.includes('secrets.'));
 });

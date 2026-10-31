@@ -60,7 +60,7 @@ jobs:
           az deployment group what-if --resource-group "$RESOURCE_GROUP" --subscription "$AZURE_SUBSCRIPTION_ID" \
             --name "verify-${GITHUB_RUN_ID}" --template-file infrastructure-verification/resources.json \
             --parameters @infrastructure-verification/parameters.json --mode Incremental \
-            --result-format FullResourcePayload --no-pretty-print --output json > "$WHAT_IF_FILE"
+            --result-format FullResourcePayloads --no-pretty-print --output json > "$WHAT_IF_FILE"
           node infra/scripts/verify-infrastructure.mjs summary infrastructure-verification
       - uses: actions/upload-artifact@v4.6.2
         with:
