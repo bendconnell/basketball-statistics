@@ -16,6 +16,8 @@ test('full preview blocks successful but inconclusive or destructive results', (
 test('protected apply depends on a checked secret-safe preview', () => {
   const workflow = readFileSync(new URL('../../.github/workflows/azure-infrastructure.yml', import.meta.url), 'utf8');
   assert.match(workflow, /--result-format ResourceIdOnly/);
-  assert.match(workflow, /node infra\/scripts\/check-full-preview\.mjs "\$whatif"/);
+  assert.match(workflow, /node infra\/scripts\/deployment-preview\.mjs review infra-plan/);
+  assert.match(workflow, /inputs\.replace_app_settings == true/);
+  assert.match(workflow, /node infra\/scripts\/deployment-preview\.mjs recheck infra-plan/);
   assert.match(workflow, /needs: preview/);
 });

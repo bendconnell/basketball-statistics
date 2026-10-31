@@ -37,7 +37,7 @@ test('full provisioning and verification share one resource template', () => {
   const main = readFileSync(new URL('../main.bicep', import.meta.url), 'utf8');
   const workflow = readFileSync(new URL('../../.github/workflows/azure-verify-infrastructure.yml', import.meta.url), 'utf8');
   assert.match(main, /module resources '\.\/resources\.bicep'/);
-  assert.match(main, /dependsOn: \[resources\]/);
+  assert.match(main, /dependsOn: \[resources, data\]/);
   assert.match(workflow, /--file infra\/resources\.bicep/);
   assert.match(workflow, /--result-format FullResourcePayloads\s/);
   assert.ok(!workflow.includes('deployment group create'));

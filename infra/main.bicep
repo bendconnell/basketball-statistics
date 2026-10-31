@@ -35,8 +35,11 @@ param storageConnectionString string = ''
 @maxValue(365)
 param softDeleteDays int = 14
 
-// Shared with the read-only verification workflow; authentication stays separate.
-module resources './resources.bicep' = {
+@description('Adopt existing owned site/account/services without root PUTs. Requires verified security and retention baseline.')
+param adoptExisting bool = false
+
+// Provisioning shares the read-only resource template; adoption retains parents.
+module resources './resources.bicep' = if (!adoptExisting) {
   params: {
     staticWebAppName: staticWebAppName
     storageAccountName: storageAccountName
@@ -50,8 +53,18 @@ resource storage 'Microsoft.Storage/storageAccounts@2025-06-01' existing = {
   name: storageAccountName
 }
 
+resource site 'Microsoft.Web/staticSites@2024-11-01' existing = {
+  name: staticWebAppName
+}
+
+module data './data.bicep' = if (adoptExisting) {
+  params: {
+    storageAccountName: storageAccountName
+  }
+}
+
 module settings './appsettings.bicep' = {
-  dependsOn: [resources]
+  dependsOn: [resources, data]
   params: {
     staticWebAppName: staticWebAppName
     entraClientId: entraClientId
@@ -63,6 +76,6 @@ module settings './appsettings.bicep' = {
   }
 }
 
-output staticWebAppResourceId string = resources.outputs.staticWebAppResourceId
-output storageResourceId string = resources.outputs.storageResourceId
-output siteUrl string = resources.outputs.siteUrl
+output staticWebAppResourceId string = site.id
+output storageResourceId string = storage.id
+output siteUrl string = 'https://${site.properties.defaultHostname}'

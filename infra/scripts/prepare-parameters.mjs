@@ -38,7 +38,8 @@ export function publicParameters(env, includeIdentity = true) {
   const resourceGroup = required(env, 'RESOURCE_GROUP');
   if (!/^[a-zA-Z0-9][a-zA-Z0-9_.()-]{0,89}$/.test(resourceGroup) || resourceGroup.endsWith('.')) throw new Error('Invalid resource group name');
   const values = { staticWebAppName, storageAccountName, location, storageLocation: env.STORAGE_LOCATION || location,
-    ...(includeIdentity ? { entraClientId: env.ENTRA_CLIENT_ID } : {}) };
+    ...(includeIdentity ? { entraClientId: env.ENTRA_CLIENT_ID,
+      adoptExisting: env.ADOPT_EXISTING === 'true' } : {}) };
   return {
     subscriptionId: env.AZURE_SUBSCRIPTION_ID,
     tenantId: env.AZURE_TENANT_ID,

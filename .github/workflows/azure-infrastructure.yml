@@ -8,6 +8,16 @@ on:
         type: boolean
         required: true
         default: false
+      adopt_existing:
+        description: 'Adopt existing owned site/storage/service parents without root PUTs (disable only for full provisioning)'
+        type: boolean
+        required: true
+        default: true
+      replace_app_settings:
+        description: 'Approve authoritative replacement of the four documented app settings; ARM cannot diff this endpoint (no GET)'
+        type: boolean
+        required: true
+        default: false
 
 permissions:
   contents: read
@@ -30,6 +40,7 @@ env:
   STORAGE_ACCOUNT_NAME: ${{ vars.STORAGE_ACCOUNT_NAME }}
   ENTRA_CLIENT_ID: ${{ vars.ENTRA_CLIENT_ID }}
   ENTRA_OIDC_DISCOVERY_URL: ${{ vars.ENTRA_OIDC_DISCOVERY_URL }}
+  ADOPT_EXISTING: ${{ inputs.adopt_existing }}
 
 jobs:
   preview:
@@ -54,28 +65,45 @@ jobs:
           APPROVED_USERS_JSON: ${{ secrets.APPROVED_USERS_JSON }}
           STORAGE_CONNECTION_STRING: ${{ secrets.STORAGE_CONNECTION_STRING }}
       - name: Compile immutable deployment artifact
-        run: az bicep build --file infra/main.bicep --outfile infra-plan/main.json
+        run: |
+          az bicep build --file infra/main.bicep --outfile infra-plan/main.json
+          node infra/scripts/deployment-preview.mjs parameters infra-plan
+          if [ "$ADOPT_EXISTING" = "true" ]; then
+            az bicep build --file infra/data.bicep --outfile infra-plan/resources.json
+          else
+            az bicep build --file infra/resources.bicep --outfile infra-plan/resources.json
+          fi
       - uses: azure/login@v2.3.0
         with:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-      - name: What-if ONLY; resource group must already exist
+      - name: Verify owned inventory and existing security baseline
+        run: node infra/scripts/deployment-preview.mjs inventory infra-plan
+      - name: Detailed public resource preview and secret-safe settings review
         env:
           ENTRA_CLIENT_SECRET: ${{ secrets.ENTRA_CLIENT_SECRET }}
           APPROVED_USERS_JSON: ${{ secrets.APPROVED_USERS_JSON }}
           STORAGE_CONNECTION_STRING: ${{ secrets.STORAGE_CONNECTION_STRING }}
+          FULL_WHAT_IF_FILE: ${{ runner.temp }}/infra-whatif.json
+          RESOURCE_WHAT_IF_FILE: ${{ runner.temp }}/resources-whatif.json
         run: |
           set -euo pipefail
           parameters="$RUNNER_TEMP/infra-parameters.json"
-          whatif="$RUNNER_TEMP/infra-whatif.json"
-          trap 'rm -f "$parameters" "$whatif"' EXIT
+          umask 077
+          trap 'rm -f "$parameters" "$FULL_WHAT_IF_FILE" "$RESOURCE_WHAT_IF_FILE"' EXIT
           node infra/scripts/prepare-parameters.mjs secure "$parameters"
           az group show --name "$RESOURCE_GROUP" --subscription "$AZURE_SUBSCRIPTION_ID" --output none
           az deployment group what-if --resource-group "$RESOURCE_GROUP" --subscription "$AZURE_SUBSCRIPTION_ID" \
+            --name "resources-${GITHUB_RUN_ID}" --template-file infra-plan/resources.json \
+            --parameters @infra-plan/resource-parameters.json --mode Incremental \
+            --result-format FullResourcePayloads --no-pretty-print --output json > "$RESOURCE_WHAT_IF_FILE"
+          az deployment group validate --resource-group "$RESOURCE_GROUP" --subscription "$AZURE_SUBSCRIPTION_ID" \
+            --template-file infra-plan/main.json --parameters "@$parameters" --output none
+          az deployment group what-if --resource-group "$RESOURCE_GROUP" --subscription "$AZURE_SUBSCRIPTION_ID" \
             --name "bball-${GITHUB_RUN_ID}" --template-file infra-plan/main.json \
-            --parameters "@$parameters" --result-format ResourceIdOnly --no-pretty-print --output json > "$whatif"
-          node infra/scripts/check-full-preview.mjs "$whatif"
+            --parameters "@$parameters" --mode Incremental --result-format ResourceIdOnly --no-pretty-print --output json > "$FULL_WHAT_IF_FILE"
+          node infra/scripts/deployment-preview.mjs review infra-plan
       - name: Retain reviewed template and nonsecret parameters (never secrets)
         uses: actions/upload-artifact@v4.6.2
         with:
@@ -85,7 +113,7 @@ jobs:
           if-no-files-found: error
 
   production-infrastructure:
-    if: inputs.apply == true && github.ref == 'refs/heads/main'
+    if: inputs.apply == true && inputs.replace_app_settings == true && github.ref == 'refs/heads/main'
     needs: preview
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -119,7 +147,8 @@ jobs:
           parameters="$RUNNER_TEMP/infra-parameters.json"
           trap 'rm -f "$parameters"' EXIT
           node infra/scripts/prepare-parameters.mjs secure "$parameters"
+          node infra/scripts/deployment-preview.mjs recheck infra-plan
           az group show --name "$RESOURCE_GROUP" --subscription "$AZURE_SUBSCRIPTION_ID" --output none
           az deployment group create --resource-group "$RESOURCE_GROUP" --subscription "$AZURE_SUBSCRIPTION_ID" \
             --name "bball-${GITHUB_RUN_ID}" --template-file infra-plan/main.json \
-            --parameters "@$parameters" --output none
+            --parameters "@$parameters" --mode Incremental --output none
