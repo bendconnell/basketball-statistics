@@ -24,20 +24,21 @@ export function validateApprovedUsers(raw) {
   return raw;
 }
 
-export function publicParameters(env) {
+export function publicParameters(env, includeIdentity = true) {
   const guid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  for (const name of ['AZURE_CLIENT_ID', 'AZURE_TENANT_ID', 'AZURE_SUBSCRIPTION_ID', 'ENTRA_CLIENT_ID']) {
+  for (const name of ['AZURE_CLIENT_ID', 'AZURE_TENANT_ID', 'AZURE_SUBSCRIPTION_ID', ...(includeIdentity ? ['ENTRA_CLIENT_ID'] : [])]) {
     if (!guid.test(required(env, name))) throw new Error(`${name} must be a UUID`);
   }
-  validateDiscoveryUrl(required(env, 'ENTRA_OIDC_DISCOVERY_URL'));
+  if (includeIdentity) validateDiscoveryUrl(required(env, 'ENTRA_OIDC_DISCOVERY_URL'));
   const storageAccountName = required(env, 'STORAGE_ACCOUNT_NAME');
   if (!/^[a-z0-9]{3,24}$/.test(storageAccountName)) throw new Error('Invalid Storage account name');
   const staticWebAppName = required(env, 'STATIC_WEB_APP_NAME');
-  if (!/^[a-zA-Z0-9-]{2,60}$/.test(staticWebAppName)) throw new Error('Invalid Static Web App name');
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9-]{1,59}$/.test(staticWebAppName)) throw new Error('Invalid Static Web App name');
   const location = required(env, 'AZURE_LOCATION');
   const resourceGroup = required(env, 'RESOURCE_GROUP');
-  if (!/^[a-zA-Z0-9_.()-]{1,90}$/.test(resourceGroup) || resourceGroup.endsWith('.')) throw new Error('Invalid resource group name');
-  const values = { staticWebAppName, storageAccountName, location, storageLocation: env.STORAGE_LOCATION || location, entraClientId: env.ENTRA_CLIENT_ID };
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9_.()-]{0,89}$/.test(resourceGroup) || resourceGroup.endsWith('.')) throw new Error('Invalid resource group name');
+  const values = { staticWebAppName, storageAccountName, location, storageLocation: env.STORAGE_LOCATION || location,
+    ...(includeIdentity ? { entraClientId: env.ENTRA_CLIENT_ID } : {}) };
   return {
     subscriptionId: env.AZURE_SUBSCRIPTION_ID,
     tenantId: env.AZURE_TENANT_ID,

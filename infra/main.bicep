@@ -35,90 +35,25 @@ param storageConnectionString string = ''
 @maxValue(365)
 param softDeleteDays int = 14
 
-resource site 'Microsoft.Web/staticSites@2024-11-01' = {
-  name: staticWebAppName
-  location: location
-  tags: {
-    application: 'bball-stats'
-    repository: 'bendconnell/basketball-statistics'
-  }
-  sku: {
-    name: 'Standard'
-    tier: 'Standard'
-  }
-  properties: {
-    provider: 'Custom'
-    allowConfigFileUpdates: true
-    stagingEnvironmentPolicy: 'Disabled'
-    buildProperties: {
-      skipGithubActionWorkflowGeneration: true
-    }
+// Shared with the read-only verification workflow; authentication stays separate.
+module resources './resources.bicep' = {
+  params: {
+    staticWebAppName: staticWebAppName
+    storageAccountName: storageAccountName
+    location: location
+    storageLocation: storageLocation
+    softDeleteDays: softDeleteDays
   }
 }
 
-resource storage 'Microsoft.Storage/storageAccounts@2025-06-01' = {
+resource storage 'Microsoft.Storage/storageAccounts@2025-06-01' existing = {
   name: storageAccountName
-  location: storageLocation
-  tags: {
-    application: 'bball-stats'
-    repository: 'bendconnell/basketball-statistics'
-  }
-  kind: 'StorageV2'
-  sku: {
-    name: 'Standard_LRS'
-  }
-  properties: {
-    accessTier: 'Hot'
-    minimumTlsVersion: 'TLS1_2'
-    supportsHttpsTrafficOnly: true
-    allowBlobPublicAccess: false
-    // Managed SWA Functions have no managed identity or private-network integration.
-    allowSharedKeyAccess: true
-    publicNetworkAccess: 'Enabled'
-    networkAcls: {
-      bypass: 'None'
-      defaultAction: 'Allow'
-    }
-  }
 }
-
-resource blobService 'Microsoft.Storage/storageAccounts/blobServices@2025-06-01' = {
-  parent: storage
-  name: 'default'
-  properties: {
-    isVersioningEnabled: true
-    deleteRetentionPolicy: {
-      enabled: true
-      days: softDeleteDays
-    }
-    containerDeleteRetentionPolicy: {
-      enabled: true
-      days: softDeleteDays
-    }
-  }
-}
-
-resource sessions 'Microsoft.Storage/storageAccounts/blobServices/containers@2025-06-01' = {
-  parent: blobService
-  name: 'game-sessions'
-  properties: {
-    publicAccess: 'None'
-  }
-}
-
-resource tableService 'Microsoft.Storage/storageAccounts/tableServices@2025-06-01' = {
-  parent: storage
-  name: 'default'
-}
-
-resource tables 'Microsoft.Storage/storageAccounts/tableServices/tables@2025-06-01' = [for tableName in ['CompetitionData', 'SessionOperations']: {
-  parent: tableService
-  name: tableName
-}]
 
 module settings './appsettings.bicep' = {
+  dependsOn: [resources]
   params: {
-    staticWebAppName: site.name
+    staticWebAppName: staticWebAppName
     entraClientId: entraClientId
     entraClientSecret: entraClientSecret
     approvedUsersJson: approvedUsersJson
@@ -128,6 +63,6 @@ module settings './appsettings.bicep' = {
   }
 }
 
-output staticWebAppResourceId string = site.id
-output storageResourceId string = storage.id
-output siteUrl string = 'https://${site.properties.defaultHostname}'
+output staticWebAppResourceId string = resources.outputs.staticWebAppResourceId
+output storageResourceId string = resources.outputs.storageResourceId
+output siteUrl string = resources.outputs.siteUrl

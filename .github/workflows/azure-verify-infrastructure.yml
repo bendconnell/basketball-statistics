@@ -1,0 +1,70 @@
+name: Azure infrastructure verification (read-only)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: azure-production-lifecycle
+  cancel-in-progress: false
+
+env:
+  AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+  AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+  AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+  RESOURCE_GROUP: ${{ vars.RESOURCE_GROUP }}
+  AZURE_LOCATION: ${{ vars.AZURE_LOCATION }}
+  STORAGE_LOCATION: ${{ vars.STORAGE_LOCATION }}
+  STATIC_WEB_APP_NAME: ${{ vars.STATIC_WEB_APP_NAME }}
+  STORAGE_ACCOUNT_NAME: ${{ vars.STORAGE_ACCOUNT_NAME }}
+  AZURE_DEPLOY_ENABLED: ${{ vars.AZURE_DEPLOY_ENABLED }}
+  DECOMMISSION_MODE: keep-data
+  DECOMMISSION_APPLY: 'false'
+
+jobs:
+  verify:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: production-infrastructure
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4.4.0
+        with:
+          node-version: '22'
+      - name: Validate nonsecret targets and compile shared resource definitions
+        run: |
+          node infra/scripts/decommission.mjs validate
+          node infra/scripts/verify-infrastructure.mjs parameters infrastructure-verification
+          az bicep build --file infra/resources.bicep --outfile infrastructure-verification/resources.json
+      - uses: azure/login@v2.3.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Verify exact resource ownership before what-if
+        run: node infra/scripts/decommission.mjs preview infrastructure-verification/inventory.json
+      - name: Read-only what-if; never apply and never fetch credentials
+        env:
+          WHAT_IF_FILE: ${{ runner.temp }}/infrastructure-what-if.json
+        run: |
+          set -euo pipefail
+          trap 'rm -f "$WHAT_IF_FILE"' EXIT
+          az deployment group what-if --resource-group "$RESOURCE_GROUP" --subscription "$AZURE_SUBSCRIPTION_ID" \
+            --name "verify-${GITHUB_RUN_ID}" --template-file infrastructure-verification/resources.json \
+            --parameters @infrastructure-verification/parameters.json --mode Incremental \
+            --result-format FullResourcePayload --no-pretty-print --output json > "$WHAT_IF_FILE"
+          node infra/scripts/verify-infrastructure.mjs summary infrastructure-verification
+      - uses: actions/upload-artifact@v4.6.2
+        with:
+          name: infrastructure-verification
+          path: infrastructure-verification/
+          retention-days: 3
+          if-no-files-found: error
