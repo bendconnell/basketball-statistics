@@ -63,7 +63,7 @@ export function CandidateGrid({
                 <li key={event.id}>
                   <span>{event.clock}</span>
                   <strong>{event.type === "possession_end" ? "Possession End" : event.type}</strong>
-                  {event.type !== "possession_end" ? <span>{getPlayerName(players, event.playerId)}</span> : null}
+                  {event.type !== "possession_end" ? <span>{getPlayerName(players, ["opp_score", "opposition_miss", "opposition_rebound"].includes(event.type) ? "__opposition__" : event.playerId)}</span> : null}
                   {event.points ? <em>{event.points} pts</em> : null}
                   {event.note ? <small>{event.note}</small> : null}
                 </li>

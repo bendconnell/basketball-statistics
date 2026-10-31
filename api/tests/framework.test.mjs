@@ -306,3 +306,13 @@ test("OpenAPI parses and includes all implemented paths and operation discrimina
   checkRefs(spec);
   assert.ok(sessionStateSchema.safeParse(createInitialState(details)).success);
 });
+test("miss attempt points persist through API log replay without changing either score", async () => {
+  const f = await fixture(), session = await createSession(f);
+  await f.service.handle("POST", `v1/sessions/${session.id}/operations`, headers(user), operation("context.replace", setup));
+  for (const [index, type, playerId] of [[1, "shot_miss", "p-1"], [2, "opposition_miss", ""]]) {
+    await f.service.handle("POST", `v1/sessions/${session.id}/operations`, headers(user), operation("event.add", { possessionId: "pos-01", event: { id: `miss-${index}`, type, playerId, clock: "09:50", points: 3 } }, index));
+  }
+  const loaded = (await f.service.handle("GET", `v1/sessions/${session.id}/snapshot`, headers(user))).body;
+  assert.deepEqual(loaded.state.possessions[0].events.map(e => e.points), [3, 3]);
+  assert.equal(loaded.state.possessions[0].pointsFor, 0); assert.equal(loaded.state.possessions[0].pointsAgainst, 0);
+});

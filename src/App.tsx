@@ -21,6 +21,7 @@ import { IndividualDifferential } from "./candidates/IndividualDifferential";
 import { SubstitutionsTab } from "./candidates/SubstitutionsTab";
 import { ConfigurationTab } from "./candidates/ConfigurationTab";
 import { CompetitionPortal, LoginScreen } from "./CompetitionPortal";
+import { CloudApp } from "./CloudPortal";
 import type { Competition, LocalAccount, ScheduledGame } from "./lib/competitions";
 
 const ROSTER_STORAGE_KEY = "bball-stats.roster.v2";
@@ -127,6 +128,10 @@ function createInitialPossession(): Possession {
 }
 
 export default function App() {
+  return import.meta.env.VITE_BACKEND_MODE === "azure" ? <CloudApp /> : <LocalApp />;
+}
+
+function LocalApp() {
   const [account, setAccount] = useState<LocalAccount | null>(null);
   const [selectedGame, setSelectedGame] = useState<{ game: ScheduledGame; competition: Competition } | null>(null);
   if (!account) return <LoginScreen onLogin={setAccount} />;

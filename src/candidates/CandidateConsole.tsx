@@ -12,7 +12,8 @@ interface ConsoleProps extends CandidateProps {
   statistics: StatisticsConfiguration;
   possessionSide: PossessionSide;
   onCourtLineup: string[];
-  onDeleteEvent: (possessionId: string, eventId: string) => void;
+  onDeleteEvent: (possessionId: string, eventId: string) => boolean | void;
+  protectBoundaries?: boolean;
   onUpdatePossessionDetails: (id: string, data: PossessionDetailsData) => void;
   onUpdateScoreAssist: (possessionId: string, scoreId: string, assist: ScoreAssist) => void;
 }
@@ -27,6 +28,7 @@ export function CandidateConsole({
   possessionSide,
   onCourtLineup,
   onDeleteEvent,
+  protectBoundaries = false,
   statistics,
   onUpdateScoreAssist,
   onUpdatePossessionDetails
@@ -311,26 +313,25 @@ export function CandidateConsole({
                     Possession End <span aria-hidden="true">· Edit</span>
                   </button>
                 ) : <strong>{event.type.split("_").join(" ")}</strong>}
-                {event.type !== "possession_end" ? <span>{getPlayerName(players, event.playerId)}</span> : null}
+                {event.type !== "possession_end" ? <span>{getPlayerName(players, ["opp_score", "opposition_miss", "opposition_rebound"].includes(event.type) ? "__opposition__" : event.playerId)}</span> : null}
                 {event.points ? (
                   <em>{event.points} {event.type === "shot_miss" || event.type === "opposition_miss" ? "pt attempt" : "pts"}</em>
                 ) : null}
                 {event.type === "shot_made" ? <span>Assist: {event.assist?.status === "player"
                   ? getPlayerName(players, event.assist.playerId)
                   : event.assist?.status === "not_applicable" ? "Not Applicable" : "Unknown"}</span> : null}
-                <button
+                {!(protectBoundaries && event.type === "possession_end") ? <button
                   type="button"
                   className="delete-entry-btn"
                   aria-label={`Delete ${event.type.split("_").join(" ")} at ${event.clock} from possession ${formatPossessionId(event.possessionId)}`}
                   title="Delete entry"
                   onClick={() => {
-                    onDeleteEvent(event.possessionId, event.id);
-                    setCommandFeedback("Entry deleted.");
+                    if (onDeleteEvent(event.possessionId, event.id) !== false) setCommandFeedback("Entry deleted.");
                     chatInputRef.current?.focus();
                   }}
                 >
                   ×
-                </button>
+                </button> : null}
               </li>
             ))}
           </ul>

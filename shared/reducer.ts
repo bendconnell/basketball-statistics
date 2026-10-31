@@ -33,7 +33,7 @@ export function validateState(input: SessionState): SessionState {
     for (const e of p.events) {
       eventIds.push(e.id);
       const scoring = e.type === "shot_made" || e.type === "opp_score";
-      requireRule(scoring || e.points === undefined, "Points on non-scoring event");
+      requireRule(scoring || e.type === "shot_miss" || e.type === "opposition_miss" || e.points === undefined, "Points on non-shot event");
       if (e.type === "shot_made") pointsFor += e.points ?? 2;
       if (e.type === "opp_score") pointsAgainst += e.points ?? 2;
       const teamEvent = !["possession_end", "opp_score", "opposition_miss", "opposition_rebound"].includes(e.type);
