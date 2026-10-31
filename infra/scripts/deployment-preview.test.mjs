@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { assertBaseline, checkReviewedPreview } from './deployment-preview.mjs';
+import { assertBaseline, assertLocations, checkReviewedPreview } from './deployment-preview.mjs';
 
 const plan = { subscription: '00000000-0000-0000-0000-000000000001', group: 'rg', site: 'site', storage: 'storage' };
 const prefix = `/subscriptions/${plan.subscription}/resourceGroups/rg/providers`;
@@ -59,4 +59,19 @@ test('adoption Bicep deploys children only and never service/account parents', (
   for (const name of ['storage', 'blobService', 'tableService']) assert.match(source, new RegExp(`resource ${name} '[^']+' existing`));
   assert.match(source, /publicAccess: 'None'/);
   assert.match(source, /\['CompetitionData', 'SessionOperations'\]/);
+});
+
+test('Azure display location names match their canonical region names', () => {
+  const manifest = { parameters: { location: { value: 'eastasia' }, storageLocation: { value: 'australiaeast' } } };
+  for (const location of ['East Asia', 'eastasia', ' EAST ASIA ']) {
+    assert.doesNotThrow(() => assertLocations({ location }, { location: 'Australia East' }, manifest));
+  }
+});
+
+test('region normalization still rejects different, missing and malformed locations', () => {
+  const manifest = { parameters: { location: { value: 'eastasia' }, storageLocation: { value: 'australiaeast' } } };
+  for (const location of ['Southeast Asia', 'Global', '', undefined, null, 'east-asia', 123]) {
+    assert.throws(() => assertLocations({ location }, { location: 'Australia East' }, manifest));
+  }
+  assert.throws(() => assertLocations({ location: 'East Asia' }, { location: 'Australia Southeast' }, manifest));
 });

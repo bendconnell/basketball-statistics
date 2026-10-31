@@ -53,6 +53,17 @@ export function assertBaseline(site, storage, blob) {
     || b?.containerDeleteRetentionPolicy?.days !== 14) throw Error('Existing Blob retention baseline failed');
 }
 
+export function assertLocations(site, storage, manifest) {
+  // Resource providers can return display names ("East Asia") instead of
+  // canonical region names ("eastasia"). Only case/whitespace are equivalent.
+  function normalize(value) {
+    if (typeof value !== 'string' || !/^[a-z0-9\s]+$/i.test(value) || !value.trim()) throw Error('Missing or invalid resource location');
+    return value.replace(/\s/g, '').toLowerCase();
+  }
+  if (normalize(site.location) !== normalize(manifest.parameters.location.value)
+    || normalize(storage.location) !== normalize(manifest.parameters.storageLocation.value)) throw Error('Existing resource location differs from reviewed configuration');
+}
+
 function az(args) {
   // Never propagate stdout or rich CLI errors containing app settings to logs.
   try { return JSON.parse(execFileSync('az', [...args, '--output', 'json'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })); }
@@ -71,8 +82,7 @@ function inventory(manifest) {
     const account = az(['resource', 'show', '--ids', `${prefix}/Microsoft.Storage/storageAccounts/${storage}`, '--api-version', '2025-06-01']);
     const blob = az(['resource', 'show', '--ids', `${prefix}/Microsoft.Storage/storageAccounts/${storage}/blobServices/default`, '--api-version', '2025-06-01']);
     assertBaseline(root, account, blob);
-    if (root.location?.toLowerCase() !== manifest.parameters.location.value.toLowerCase()
-      || account.location?.toLowerCase() !== manifest.parameters.storageLocation.value.toLowerCase()) throw Error('Existing resource location differs from reviewed configuration');
+    assertLocations(root, account, manifest);
   }
   // Listing uses POST, not GET. Retain names only; never emit settings values.
   const settings = plan.resources.some(r => r.type.toLowerCase() === 'microsoft.web/staticsites')
