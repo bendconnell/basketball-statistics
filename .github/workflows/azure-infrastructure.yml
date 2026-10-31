@@ -68,12 +68,14 @@ jobs:
         run: |
           set -euo pipefail
           parameters="$RUNNER_TEMP/infra-parameters.json"
-          trap 'rm -f "$parameters"' EXIT
+          whatif="$RUNNER_TEMP/infra-whatif.json"
+          trap 'rm -f "$parameters" "$whatif"' EXIT
           node infra/scripts/prepare-parameters.mjs secure "$parameters"
           az group show --name "$RESOURCE_GROUP" --subscription "$AZURE_SUBSCRIPTION_ID" --output none
           az deployment group what-if --resource-group "$RESOURCE_GROUP" --subscription "$AZURE_SUBSCRIPTION_ID" \
             --name "bball-${GITHUB_RUN_ID}" --template-file infra-plan/main.json \
-            --parameters "@$parameters" --result-format ResourceIdOnly --no-pretty-print
+            --parameters "@$parameters" --result-format ResourceIdOnly --no-pretty-print --output json > "$whatif"
+          node infra/scripts/check-full-preview.mjs "$whatif"
       - name: Retain reviewed template and nonsecret parameters (never secrets)
         uses: actions/upload-artifact@v4.6.2
         with:
