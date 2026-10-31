@@ -1,0 +1,43 @@
+{
+  "platform": { "apiRuntime": "node:22" },
+  "routes": [
+    { "route": "/api/v1/health", "methods": ["GET"], "allowedRoles": ["anonymous"] },
+    { "route": "/api", "allowedRoles": ["authenticated"] },
+    { "route": "/api/*", "allowedRoles": ["authenticated"] },
+    { "route": "/.auth/login/externalid*", "allowedRoles": ["anonymous"] },
+    { "route": "/.auth/login/*", "statusCode": 404 },
+    { "route": "/.auth/me", "allowedRoles": ["anonymous"], "headers": { "Cache-Control": "no-store" } },
+    { "route": "/.auth/logout*", "allowedRoles": ["anonymous"] }
+  ],
+  "navigationFallback": {
+    "rewrite": "/index.html",
+    "exclude": ["/api", "/api/*", "/.auth/*", "/assets/*", "/*.{json,css,js,png,jpg,jpeg,svg,ico,webp,woff,woff2}"]
+  },
+  "globalHeaders": {
+    "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=()"
+  },
+  "auth": {
+    "identityProviders": {
+      "customOpenIdConnectProviders": {
+        "externalid": {
+          "registration": {
+            "clientIdSettingName": "ENTRA_CLIENT_ID",
+            "clientCredential": { "clientSecretSettingName": "ENTRA_CLIENT_SECRET" },
+            "openIdConnectConfiguration": {
+              "wellKnownOpenIdConfiguration": "https://REPLACE_WITH_EXTERNAL_TENANT.ciamlogin.com/REPLACE_WITH_TENANT_ID/v2.0/.well-known/openid-configuration"
+            }
+          },
+          "login": {
+            "nameClaimType": "name",
+            "scopes": ["openid", "profile", "email"],
+            "loginParameterNames": []
+          }
+        }
+      }
+    }
+  }
+}

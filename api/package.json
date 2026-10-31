@@ -1,0 +1,21 @@
+{
+  "name": "bball-stats-api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/api/src/functions.js",
+  "engines": { "node": "22.x" },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check:shared": "tsc -p ../shared/tsconfig.json",
+    "test": "npm run build && node --test tests/*.test.mjs",
+    "start": "func start"
+  },
+  "dependencies": {
+    "@azure/functions": "^4.0.0",
+    "@azure/data-tables": "^13.3.0",
+    "@azure/storage-blob": "^12.27.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": { "@types/node": "^22.0.0", "typescript": "^5.9.3", "yaml": "^2.8.0" }
+}

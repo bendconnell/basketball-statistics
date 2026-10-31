@@ -1,0 +1,97 @@
+name: Azure application deployment
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: azure-application-production
+  cancel-in-progress: false
+
+jobs:
+  checks:
+    if: vars.AZURE_DEPLOY_ENABLED == 'true' && github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/ci.yml
+
+  deploy:
+    if: vars.AZURE_DEPLOY_ENABLED == 'true' && github.ref == 'refs/heads/main'
+    needs: checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: production
+    steps:
+      - uses: actions/checkout@v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4.4.0
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            api/package-lock.json
+      - name: Require deployment configuration before building
+        env:
+          ENTRA_OIDC_DISCOVERY_URL: ${{ vars.ENTRA_OIDC_DISCOVERY_URL }}
+          SITE_URL: ${{ vars.SITE_URL }}
+          DEPLOY_TOKEN: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { validateDiscoveryUrl } from './infra/scripts/render-swa-config.mjs';
+          validateDiscoveryUrl(process.env.ENTRA_OIDC_DISCOVERY_URL);
+          const site = new URL(process.env.SITE_URL);
+          if (site.protocol !== 'https:' || site.username || site.password || site.pathname !== '/' || site.search || site.hash) throw new Error('SITE_URL must be the HTTPS production origin');
+          if (!process.env.DEPLOY_TOKEN) throw new Error('Missing environment deployment token');
+          NODE
+      - run: npm ci
+      - run: npm ci --prefix api
+      - name: Build frontend
+        run: npm run build
+        env:
+          VITE_BACKEND_MODE: azure
+      - name: Render production OIDC configuration in frontend output only
+        run: node infra/scripts/render-swa-config.mjs
+        env:
+          ENTRA_OIDC_DISCOVERY_URL: ${{ vars.ENTRA_OIDC_DISCOVERY_URL }}
+      - name: Build and stage the complete prebuilt Functions application
+        run: |
+          npm run build --prefix api
+          mkdir -p "$RUNNER_TEMP/api-stage"
+          cp api/package.json api/package-lock.json api/host.json "$RUNNER_TEMP/api-stage/"
+          cp -R api/dist "$RUNNER_TEMP/api-stage/dist"
+          npm ci --omit=dev --prefix "$RUNNER_TEMP/api-stage"
+          node --input-type=module <<'NODE'
+          import { existsSync, readFileSync } from 'node:fs';
+          const base = `${process.env.RUNNER_TEMP}/api-stage`;
+          const pkg = JSON.parse(readFileSync(`${base}/package.json`, 'utf8'));
+          if (pkg.main !== 'dist/api/src/functions.js' || !existsSync(`${base}/${pkg.main}`)) throw new Error('Incorrect Functions entry point');
+          if (!existsSync(`${base}/dist/shared/reducer.js`) || !existsSync(`${base}/host.json`) || !existsSync(`${base}/node_modules/@azure/functions`)) throw new Error('Incomplete Functions artifact');
+          NODE
+          mv "$RUNNER_TEMP/api-stage" .azure-api
+      - name: Deploy prebuilt frontend and managed API
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+          action: upload
+          production_branch: main
+          app_location: dist
+          output_location: ''
+          api_location: .azure-api
+          skip_app_build: true
+          skip_api_build: true
+      - name: Anonymous health smoke test (not an auth or Storage readiness test)
+        env:
+          SITE_URL: ${{ vars.SITE_URL }}
+        run: |
+          curl --fail --silent --show-error --retry 8 --retry-all-errors --retry-delay 10 \
+            --connect-timeout 10 --max-time 30 \
+            "${SITE_URL%/}/api/v1/health" > "$RUNNER_TEMP/health.json"
+          node --input-type=module <<'NODE'
+          import { readFileSync } from 'node:fs';
+          const body = JSON.parse(readFileSync(`${process.env.RUNNER_TEMP}/health.json`, 'utf8'));
+          if (body.status !== 'ok') throw new Error('Unexpected health response');
+          NODE

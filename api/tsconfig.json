@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ES2022",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "rootDir": "..",
+    "outDir": "dist",
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "types": ["node"],
+    "baseUrl": "..",
+    "paths": { "zod": ["api/node_modules/zod"] }
+  },
+  "include": ["src/**/*.ts", "../shared/**/*.ts", "../src/types.ts", "../src/lib/scoreAssist.ts", "../src/lib/possessionToggle.ts"]
+}

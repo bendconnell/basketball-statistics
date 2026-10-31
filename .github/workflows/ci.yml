@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4.4.0
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            api/package-lock.json
+      - run: npm ci
+      - run: npm ci --prefix api
+      - name: Existing frontend regression tests
+        run: node --test tests/*.test.mjs
+      - name: Infrastructure configuration tests
+        run: node --test infra/scripts/*.test.mjs
+      - name: Shared contracts type check
+        run: npm run check:shared --prefix api
+      - name: API tests and build
+        run: npm test --prefix api
+      - name: Frontend cloud build
+        run: npm run build
+        env:
+          VITE_BACKEND_MODE: azure
+      - name: Parse workflows and routing JSON
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFileSync, readdirSync } from 'node:fs';
+          import { parseDocument } from './api/node_modules/yaml/dist/index.js';
+          for (const name of readdirSync('.github/workflows').filter(name => /\.ya?ml$/.test(name))) {
+            const document = parseDocument(readFileSync(`.github/workflows/${name}`, 'utf8'), { uniqueKeys: true });
+            if (document.errors.length) throw new AggregateError(document.errors, name);
+            const workflow = document.toJS();
+            if (!workflow.on || !workflow.jobs) throw new Error(`Invalid workflow: ${name}`);
+          }
+          JSON.parse(readFileSync('dist/staticwebapp.config.json', 'utf8'));
+          NODE
+      - name: Compile Bicep (no login or deployment)
+        run: |
+          az bicep build --file infra/main.bicep --outfile "$RUNNER_TEMP/main.json"
+          az bicep build --file infra/appsettings.bicep --outfile "$RUNNER_TEMP/appsettings.json"

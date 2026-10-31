@@ -1,0 +1,11 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "AzureWebJobsStorage": "",
+    "FUNCTIONS_WORKER_RUNTIME": "node",
+    "STORAGE_CONNECTION_STRING": "",
+    "APPROVED_USERS_JSON": "",
+    "ENTRA_CLIENT_ID": "",
+    "ENTRA_CLIENT_SECRET": ""
+  }
+}

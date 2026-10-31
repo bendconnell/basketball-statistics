@@ -1,0 +1,123 @@
+name: Azure infrastructure preview and manual apply
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: 'Create/update BILLABLE resources after reviewing preview and approving the apply job'
+        type: boolean
+        required: true
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: azure-infrastructure-production
+  cancel-in-progress: false
+
+# Both jobs intentionally use the SAME GitHub environment configuration. If
+# required reviewers are enabled, preview also needs approval. GitHub environment
+# protection rules MUST be configured manually; this YAML cannot create them.
+env:
+  AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+  AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+  AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+  RESOURCE_GROUP: ${{ vars.RESOURCE_GROUP }}
+  AZURE_LOCATION: ${{ vars.AZURE_LOCATION }}
+  STORAGE_LOCATION: ${{ vars.STORAGE_LOCATION }}
+  STATIC_WEB_APP_NAME: ${{ vars.STATIC_WEB_APP_NAME }}
+  STORAGE_ACCOUNT_NAME: ${{ vars.STORAGE_ACCOUNT_NAME }}
+  ENTRA_CLIENT_ID: ${{ vars.ENTRA_CLIENT_ID }}
+  ENTRA_OIDC_DISCOVERY_URL: ${{ vars.ENTRA_OIDC_DISCOVERY_URL }}
+
+jobs:
+  preview:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: production-infrastructure
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4.4.0
+        with:
+          node-version: '22'
+      - name: Validate and snapshot nonsecret parameters
+        run: node infra/scripts/prepare-parameters.mjs snapshot infra-plan
+        env:
+          ENTRA_CLIENT_SECRET: ${{ secrets.ENTRA_CLIENT_SECRET }}
+          APPROVED_USERS_JSON: ${{ secrets.APPROVED_USERS_JSON }}
+          STORAGE_CONNECTION_STRING: ${{ secrets.STORAGE_CONNECTION_STRING }}
+      - name: Compile immutable deployment artifact
+        run: az bicep build --file infra/main.bicep --outfile infra-plan/main.json
+      - uses: azure/login@v2.3.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: What-if ONLY; resource group must already exist
+        env:
+          ENTRA_CLIENT_SECRET: ${{ secrets.ENTRA_CLIENT_SECRET }}
+          APPROVED_USERS_JSON: ${{ secrets.APPROVED_USERS_JSON }}
+          STORAGE_CONNECTION_STRING: ${{ secrets.STORAGE_CONNECTION_STRING }}
+        run: |
+          set -euo pipefail
+          parameters="$RUNNER_TEMP/infra-parameters.json"
+          trap 'rm -f "$parameters"' EXIT
+          node infra/scripts/prepare-parameters.mjs secure "$parameters"
+          az group show --name "$RESOURCE_GROUP" --subscription "$AZURE_SUBSCRIPTION_ID" --output none
+          az deployment group what-if --resource-group "$RESOURCE_GROUP" --subscription "$AZURE_SUBSCRIPTION_ID" \
+            --name "bball-${GITHUB_RUN_ID}" --template-file infra-plan/main.json \
+            --parameters "@$parameters" --result-format ResourceIdOnly --no-pretty-print
+      - name: Retain reviewed template and nonsecret parameters (never secrets)
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          name: infrastructure-plan
+          path: infra-plan/
+          retention-days: 3
+          if-no-files-found: error
+
+  production-infrastructure:
+    if: inputs.apply == true && github.ref == 'refs/heads/main'
+    needs: preview
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: production-infrastructure
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4.4.0
+        with:
+          node-version: '22'
+      - uses: actions/download-artifact@v4.3.0
+        with:
+          name: infrastructure-plan
+          path: infra-plan
+      - uses: azure/login@v2.3.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Apply exactly the compiled preview artifact, not rebuilt Bicep
+        env:
+          ENTRA_CLIENT_SECRET: ${{ secrets.ENTRA_CLIENT_SECRET }}
+          APPROVED_USERS_JSON: ${{ secrets.APPROVED_USERS_JSON }}
+          STORAGE_CONNECTION_STRING: ${{ secrets.STORAGE_CONNECTION_STRING }}
+        run: |
+          set -euo pipefail
+          parameters="$RUNNER_TEMP/infra-parameters.json"
+          trap 'rm -f "$parameters"' EXIT
+          node infra/scripts/prepare-parameters.mjs secure "$parameters"
+          az group show --name "$RESOURCE_GROUP" --subscription "$AZURE_SUBSCRIPTION_ID" --output none
+          az deployment group create --resource-group "$RESOURCE_GROUP" --subscription "$AZURE_SUBSCRIPTION_ID" \
+            --name "bball-${GITHUB_RUN_ID}" --template-file infra-plan/main.json \
+            --parameters "@$parameters" --output none
