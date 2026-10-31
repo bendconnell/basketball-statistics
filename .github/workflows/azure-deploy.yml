@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: azure-application-production
+  group: azure-production-lifecycle
   cancel-in-progress: false
 
 jobs:

@@ -13,7 +13,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: azure-infrastructure-production
+  group: azure-production-lifecycle
   cancel-in-progress: false
 
 # Both jobs intentionally use the SAME GitHub environment configuration. If

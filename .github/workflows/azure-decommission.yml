@@ -1,0 +1,106 @@
+name: Azure decommission (manual, destructive)
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'keep-data deletes hosting only; delete-data also permanently deletes storage'
+        type: choice
+        options: [keep-data, delete-data]
+        default: keep-data
+        required: true
+      apply:
+        description: 'Execute deletion after preview and environment approval (false = preview only)'
+        type: boolean
+        default: false
+        required: true
+      confirmation:
+        description: 'For apply: DELETE <subscription-id>/<resource-group>/<mode>'
+        type: string
+        required: false
+      acknowledge_data_loss:
+        description: 'For delete-data apply: I backed up data externally or accept permanent loss'
+        type: boolean
+        default: false
+        required: true
+
+permissions:
+  contents: read
+
+# Serializes creation, app deployment and deletion across workflows.
+concurrency:
+  group: azure-production-lifecycle
+  cancel-in-progress: false
+
+env:
+  AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+  RESOURCE_GROUP: ${{ vars.RESOURCE_GROUP }}
+  STATIC_WEB_APP_NAME: ${{ vars.STATIC_WEB_APP_NAME }}
+  STORAGE_ACCOUNT_NAME: ${{ vars.STORAGE_ACCOUNT_NAME }}
+  AZURE_DEPLOY_ENABLED: ${{ vars.AZURE_DEPLOY_ENABLED }}
+  DECOMMISSION_MODE: ${{ inputs.mode }}
+  DECOMMISSION_APPLY: ${{ inputs.apply }}
+  DECOMMISSION_CONFIRMATION: ${{ inputs.confirmation }}
+  ACKNOWLEDGE_DATA_LOSS: ${{ inputs.acknowledge_data_loss }}
+
+jobs:
+  preview:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: production-infrastructure
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4.4.0
+        with:
+          node-version: '22'
+      - name: Validate request before Azure login
+        run: node infra/scripts/decommission.mjs validate
+      - uses: azure/login@v2.3.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Inventory and preview (never reads app settings or storage keys)
+        run: node infra/scripts/decommission.mjs preview decommission-plan.json
+      - uses: actions/upload-artifact@v4.6.2
+        with:
+          name: decommission-plan
+          path: decommission-plan.json
+          retention-days: 3
+          if-no-files-found: error
+
+  delete:
+    if: inputs.apply == true && github.ref == 'refs/heads/main'
+    needs: preview
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: production-infrastructure
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4.4.0
+        with:
+          node-version: '22'
+      - uses: actions/download-artifact@v4.3.0
+        with:
+          name: decommission-plan
+          path: .
+      - name: Validate destructive confirmation
+        run: node infra/scripts/decommission.mjs validate
+      - uses: azure/login@v2.3.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Recheck inventory, delete exact targets and verify absence
+        run: node infra/scripts/decommission.mjs apply decommission-plan.json

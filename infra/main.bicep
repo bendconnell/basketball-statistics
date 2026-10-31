@@ -38,6 +38,10 @@ param softDeleteDays int = 14
 resource site 'Microsoft.Web/staticSites@2024-11-01' = {
   name: staticWebAppName
   location: location
+  tags: {
+    application: 'bball-stats'
+    repository: 'bendconnell/basketball-statistics'
+  }
   sku: {
     name: 'Standard'
     tier: 'Standard'
@@ -55,6 +59,10 @@ resource site 'Microsoft.Web/staticSites@2024-11-01' = {
 resource storage 'Microsoft.Storage/storageAccounts@2025-06-01' = {
   name: storageAccountName
   location: storageLocation
+  tags: {
+    application: 'bball-stats'
+    repository: 'bendconnell/basketball-statistics'
+  }
   kind: 'StorageV2'
   sku: {
     name: 'Standard_LRS'
