@@ -43,3 +43,8 @@ test('full provisioning and verification share one resource template', () => {
   assert.ok(!workflow.includes('deployment group create'));
   assert.ok(!workflow.includes('secrets.'));
 });
+
+test('shared storage template forbids purging retained blob versions', () => {
+  const resources = readFileSync(new URL('../resources.bicep', import.meta.url), 'utf8');
+  assert.match(resources, /deleteRetentionPolicy:\s*\{[^}]*enabled: true[^}]*days: softDeleteDays[^}]*allowPermanentDelete: false/);
+});

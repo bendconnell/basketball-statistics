@@ -69,6 +69,8 @@ resource blobService 'Microsoft.Storage/storageAccounts/blobServices@2025-06-01'
     deleteRetentionPolicy: {
       enabled: true
       days: softDeleteDays
+      // Retained versions/snapshots must not be purged during the retention window.
+      allowPermanentDelete: false
     }
     containerDeleteRetentionPolicy: {
       enabled: true
