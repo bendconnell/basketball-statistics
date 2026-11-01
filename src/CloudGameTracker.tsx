@@ -67,6 +67,13 @@ function SessionView({ account, game, competition, onExit, sync, onReload }: Pro
   const secondsRef = useRef(seconds);
   const [nudge, setNudge] = useState(0);
   const [chooseSide, setChooseSide] = useState(false);
+  const startSideDialog = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const dialog = startSideDialog.current;
+    if (!dialog) return;
+    if (chooseSide && !dialog.open) dialog.showModal();
+    else if (!chooseSide && dialog.open) dialog.close();
+  }, [chooseSide]);
   const [loadingDefaults, setLoadingDefaults] = useState(false);
   const state = sync.state;
   const active = state.possessions.at(-1)!;
@@ -136,7 +143,7 @@ function SessionView({ account, game, competition, onExit, sync, onReload }: Pro
   const draftValid = draftRoster.every(p => p.name.trim() && Number.isInteger(p.number) && p.number >= 0 && p.number <= 999)
     && new Set(draftRoster.map(p => p.number)).size === draftRoster.length;
   const rosterValid = draftRoster.length >= 5 && draftValid && starters.length === 5;
-  const fitScreen = state.sessionStarted && pathname === "/tagging" && !chooseSide;
+  const fitScreen = state.sessionStarted && pathname === "/tagging";
   return <div className={`app-shell cloud-game-shell${fitScreen ? " screen-fit" : ""}`}>
     <header className="active-game-header"><div><small>{competition.name} · Master: {account.name}</small><strong>{game.gameTitle} · {game.teamName} vs {game.opponentName}</strong><small>{game.gameDate} · {game.gameTime} · {game.venue}</small></div><div className="game-header-actions"><button type="button" onClick={() => void leave()}>← Sessions</button><div className={`save-status ${sync.status}`} role="status" aria-live="polite" aria-atomic="true">
       <span>{sync.status === "saved" ? "Saved" : sync.status === "saving" ? `Saving… (${sync.pending} pending)` : sync.status === "offline" ? "Offline — changes kept on this device" : sync.status === "conflict" ? "Conflict — reload required" : "Save needs attention"}</span>
@@ -170,7 +177,6 @@ function SessionView({ account, game, competition, onExit, sync, onReload }: Pro
           ["Score For", totalPointsFor(state.possessions), state.statistics.offense.shot_made], ["Score Against", totalPointsAgainst(state.possessions), state.statistics.defense.opp_score], ["Turnovers", totalTurnovers(state.possessions), state.statistics.offense.turnover], ["Offensive Rebounds", totalOffensiveRebounds(state.possessions), state.statistics.offense.offensive_rebound], ["Opposition Rebounds", totalOppositionRebounds(state.possessions), state.statistics.defense.opposition_rebound]
         ] as const).map(([label, value, enabled]) => enabled !== false ? <article key={label}><h3>{label}</h3><p>{value}</p></article> : null)}</section>
         <section className="clock-panel" aria-label="Game clock and active possession"><div className="clock-time"><p className="clock-big">{currentClock}</p><span>Time</span></div><div className="active-possession"><strong className="possession-number">{state.possessions.length}</strong><span>Possession</span></div><div className="clock-buttons"><button type="button" className={`clock-toggle-btn ${state.clockRunning ? "is-stop" : "is-start"}${!state.clockRunning && nudge ? ` clock-nudge-${nudge % 2 ? "odd" : "even"}` : ""}`} onClick={() => { setNudge(0); if (state.clockRunning) checkpoint(false); else if (seconds === 600) setChooseSide(true); else checkpoint(true); }}>{state.clockRunning ? "Stop" : "Start"}</button>{[-1, 1].map(delta => <button type="button" key={delta} disabled={state.clockRunning || seconds + delta < 0 || seconds + delta > 3600} onClick={() => { const next = seconds + delta; if (command({ type: "context.replace", payload: { clockSeconds: next } })) { secondsRef.current = next; setSeconds(next); } }}>{delta === 1 ? "+1s" : "-1s"}</button>)}<button type="button" disabled={seconds !== 0} onClick={() => { if (command({ type: "context.replace", payload: { clockSeconds: 600, clockRunning: false } })) { secondsRef.current = 600; setSeconds(600); } }}>Reset 10:00</button></div></section>
-        {chooseSide ? <div className="panel"><h3>Starting side</h3>{(["offense", "defense"] as const).map(side => <button type="button" key={side} onClick={() => { if (command({ type: "context.replace", payload: { currentSide: side, clockSeconds: secondsRef.current, clockRunning: true } })) setChooseSide(false); }}>{side === "offense" ? "Offense" : "Defense"}</button>)}<button type="button" onClick={() => setChooseSide(false)}>Cancel</button></div> : null}
         <nav className="candidate-nav"><NavLink to="/tagging">Tagging</NavLink><NavLink to="/substitutions">Substitutions</NavLink><NavLink to="/configuration">Configuration</NavLink><NavLink to="/matrix">Possession Matrix</NavLink><NavLink to="/lineups">Lineup Differential</NavLink><NavLink to="/individual">Individual Point Diff</NavLink></nav>
         <main className="candidate-stage"><Routes>
           <Route path="/tagging" element={<CandidateConsole protectBoundaries players={state.roster} possessions={state.possessions} selectedPossession={active} onSelectPossession={setReviewId} onAddEvent={addEvent} onEndPossession={toggle} currentClock={currentClock} statistics={state.statistics} possessionSide={state.currentSide} onCourtLineup={state.onCourtLineup} onDeleteEvent={(possessionId, eventId) => command({ type: "event.delete", payload: { possessionId, eventId } })} onUpdateScoreAssist={assist} onUpdatePossessionDetails={(possessionId, data) => { command({ type: "possession.details", payload: { possessionId, data } }); }} />} />
@@ -186,5 +192,20 @@ function SessionView({ account, game, competition, onExit, sync, onReload }: Pro
         </Routes></main>
       </>}
     </fieldset>
+    <dialog ref={startSideDialog} className="modal-card start-side-dialog" aria-labelledby="start-side-title"
+      onCancel={() => setChooseSide(false)} onClose={() => setChooseSide(false)}
+      onClick={event => { if (event.target === event.currentTarget) {
+        const bounds = event.currentTarget.getBoundingClientRect();
+        if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) setChooseSide(false);
+      } }}>
+      <h3 id="start-side-title">Start at 10:00</h3>
+      <p className="panel-hint">Choose which side starts this possession.</p>
+      <div className="modal-actions start-side-actions">
+        {(["offense", "defense"] as const).map(side => <button type="button" key={side} disabled={sync.blocked}
+          onClick={() => { if (command({ type: "context.replace", payload: { currentSide: side, clockSeconds: secondsRef.current, clockRunning: true } })) setChooseSide(false); }}>
+          {side === "offense" ? "Offense" : "Defense"}
+        </button>)}
+      </div>
+    </dialog>
   </div>;
 }
