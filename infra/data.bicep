@@ -20,6 +20,8 @@ resource sessions 'Microsoft.Storage/storageAccounts/blobServices/containers@202
   name: 'game-sessions'
   properties: {
     publicAccess: 'None'
+    defaultEncryptionScope: '$account-encryption-key'
+    denyEncryptionScopeOverride: false
   }
 }
 resource tables 'Microsoft.Storage/storageAccounts/tableServices/tables@2025-06-01' = [for tableName in ['CompetitionData', 'SessionOperations']: {

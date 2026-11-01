@@ -58,6 +58,8 @@ test('adoption Bicep deploys children only and never service/account parents', (
   const source = readFileSync(new URL('../data.bicep', import.meta.url), 'utf8');
   for (const name of ['storage', 'blobService', 'tableService']) assert.match(source, new RegExp(`resource ${name} '[^']+' existing`));
   assert.match(source, /publicAccess: 'None'/);
+  assert.match(source, /defaultEncryptionScope: '\$account-encryption-key'/);
+  assert.match(source, /denyEncryptionScopeOverride: false/);
   assert.match(source, /\['CompetitionData', 'SessionOperations'\]/);
 });
 

@@ -84,6 +84,8 @@ resource sessions 'Microsoft.Storage/storageAccounts/blobServices/containers@202
   name: 'game-sessions'
   properties: {
     publicAccess: 'None'
+    defaultEncryptionScope: '$account-encryption-key'
+    denyEncryptionScopeOverride: false
   }
 }
 
