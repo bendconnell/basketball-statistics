@@ -22,6 +22,24 @@ const setup = { type: "context.replace", payload: {
   lineupStints: [{ id: "stint-1", label: "Lineup 1", quarter: 1, startClock: "10:00", endClock: "10:00", lineupIds: ["player-0", "player-1", "player-2", "player-3", "player-4"] }], sessionStarted: true
 } };
 
+test("last saved time changes only after a durably recorded server acknowledgement", async () => {
+  const loaded = initial(); let release;
+  const sync = new SessionSync(loaded, "master", storage(), async (_id, op) => {
+    await new Promise(resolve => { release = resolve; });
+    return { revision: op.expectedRevision + 1 };
+  });
+  try {
+    assert.equal(sync.lastSavedAt, loaded.session.updatedAt);
+    await sync.flush();
+    assert.equal(sync.lastSavedAt, loaded.session.updatedAt, "a no-op flush is not a new save");
+    sync.enqueue(setup);
+    const flight = sync.flush();
+    assert.equal(sync.lastSavedAt, loaded.session.updatedAt, "pending changes are not saved yet");
+    release(); await flight;
+    assert.ok(Date.parse(sync.lastSavedAt) > Date.parse(loaded.session.updatedAt));
+  } finally { await sync.dispose(); }
+});
+
 test("cloud queue persists before optimistic updates and sends operations in revision order", async () => {
   const store = storage(), writes = [];
   const sync = new SessionSync(initial(), "master", store, async (_id, op) => { writes.push(op); return { revision: op.expectedRevision + 1 }; });
@@ -55,6 +73,7 @@ test("a conflicting save preserves local operations and prevents further edits",
   try {
     sync.enqueue(setup); await sync.flush();
     assert.equal(sync.status, "conflict"); assert.equal(sync.pending, 1);
+    assert.equal(sync.lastSavedAt, initial().session.updatedAt);
     assert.equal(JSON.parse(sync.exportPending()).operations.length, 1);
     assert.throws(() => sync.enqueue({ type: "context.replace", payload: { clockSeconds: 590 } }));
     assert.equal(await sync.retry(), false);
@@ -121,6 +140,7 @@ test("failed acknowledgement persistence retains the exact retry envelope and bl
   try {
     sync.enqueue(setup); full = true; assert.equal(await sync.flush(), false);
     assert.equal(sync.status, "error"); assert.equal(sync.blocked, true); assert.equal(sync.pending, 1);
+    assert.equal(sync.lastSavedAt, initial().session.updatedAt);
     full = false; assert.equal(await sync.retry(), true); assert.deepEqual(writes[0], writes[1]);
   } finally { await sync.dispose(); }
 });

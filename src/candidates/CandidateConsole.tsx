@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import type { EventDraft, EventType, PossessionSide, PossessionDetailsData, ScoreAssist, StatisticsConfiguration } from "../types";
 import { parseCommand, suggestCommands, spaceAfterCompletedPoints, statisticForCommand, type CommandSuggestion } from "../lib/commands";
 import { CandidateProps, formatPossessionId, getPlayerName } from "./common";
 import { PossessionDetailsPanel } from "./PossessionDetailsPanel";
 import { ButtonTagging } from "./ButtonTagging";
+import { useTaggingMode } from "../lib/useTaggingMode";
 
 const OPPOSITION_PLAYER_ID = "__opposition__";
 
@@ -33,14 +34,7 @@ export function CandidateConsole({
   onUpdateScoreAssist,
   onUpdatePossessionDetails
 }: ConsoleProps) {
-  const [taggingMode, setTaggingMode] = useState<"typing" | "buttons">(() => {
-    try { return localStorage.getItem("bball-stats.tagging-mode.v1") === "buttons" ? "buttons" : "typing"; }
-    catch { return "typing"; }
-  });
-  useEffect(() => {
-    try { localStorage.setItem("bball-stats.tagging-mode.v1", taggingMode); }
-    catch { /* Tagging remains available when storage is unavailable. */ }
-  }, [taggingMode]);
+  const [taggingMode] = useTaggingMode();
   const [chatInput, setChatInput] = useState("");
   const [sideNudge, setSideNudge] = useState(0);
   const onAddEvent = (possessionId: string, draft: EventDraft) => {
@@ -352,10 +346,6 @@ export function CandidateConsole({
               {possessionSide === "offense" ? "Offense" : "Defense"}
             </button>
           </div>
-        </div>
-        <div className="tag-mode-selector" role="group" aria-label="Tagging mode">
-          <button type="button" aria-pressed={taggingMode === "typing"} onClick={() => setTaggingMode("typing")}>Typing</button>
-          <button type="button" aria-pressed={taggingMode === "buttons"} onClick={() => setTaggingMode("buttons")}>Buttons</button>
         </div>
         {taggingMode === "buttons" ? (
           <>

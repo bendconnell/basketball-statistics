@@ -136,10 +136,12 @@ function SessionView({ account, game, competition, onExit, sync, onReload }: Pro
     && new Set(draftRoster.map(p => p.number)).size === draftRoster.length;
   const rosterValid = draftRoster.length >= 5 && draftValid && starters.length === 5;
   return <div className="app-shell">
-    <header className="active-game-header"><div><small>{competition.name} · Master: {account.name}</small><strong>{game.gameTitle} · {game.teamName} vs {game.opponentName}</strong><small>{game.gameDate} · {game.gameTime} · {game.venue}</small></div><button type="button" onClick={() => void leave()}>← Sessions</button></header>
-    <div className={`save-status ${sync.status}`} role="status">{sync.status === "saved" ? "Saved" : sync.status === "saving" ? `Saving (${sync.pending} pending)` : sync.status === "offline" ? "Offline / save unavailable — changes kept on this device" : sync.status === "conflict" ? "Conflict — another device changed this session" : "Save needs attention"}</div>
+    <header className="active-game-header"><div><small>{competition.name} · Master: {account.name}</small><strong>{game.gameTitle} · {game.teamName} vs {game.opponentName}</strong><small>{game.gameDate} · {game.gameTime} · {game.venue}</small></div><div className="game-header-actions"><button type="button" onClick={() => void leave()}>← Sessions</button><div className={`save-status ${sync.status}`} role="status" aria-live="polite" aria-atomic="true">
+      <span>{sync.status === "saved" ? "Saved" : sync.status === "saving" ? `Saving… (${sync.pending} pending)` : sync.status === "offline" ? "Offline — changes kept on this device" : sync.status === "conflict" ? "Conflict — reload required" : "Save needs attention"}</span>
+      <span className="last-saved">Last saved <time dateTime={sync.lastSavedAt} title={new Date(sync.lastSavedAt).toLocaleString()}>{new Date(sync.lastSavedAt).toLocaleTimeString()}</time></span>
+    </div></div></header>
     {sync.error || error ? <p className="lineup-error" role="alert">{error || sync.error}</p> : null}
-    {sync.status !== "saved" ? <div className="action-row"><button type="button" onClick={() => void sync.retry()}>Retry save</button><button type="button" onClick={download}>Export pending changes</button>{sync.blocked ? <button type="button" onClick={() => {
+    {sync.status === "offline" || sync.status === "conflict" || sync.status === "error" ? <div className="action-row"><button type="button" onClick={() => void sync.retry()}>Retry save</button><button type="button" onClick={download}>Export pending changes</button>{sync.blocked ? <button type="button" onClick={() => {
       if (window.confirm("Discard this device's pending changes and reload the server record? Export them first if needed.")) { try { sync.discardPending(); onReload(); } catch (e) { setError((e as Error).message); } }
     }}>Discard pending and reload</button> : null}</div> : null}
     <fieldset className="cloud-controls" disabled={sync.blocked}>

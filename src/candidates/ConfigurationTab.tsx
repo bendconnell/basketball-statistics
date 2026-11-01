@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import type { Player, PossessionSide, StatisticKey, StatisticsConfiguration } from "../types";
 import { statisticOptions } from "../lib/statisticsConfiguration";
+import { useTaggingMode } from "../lib/useTaggingMode";
 
 interface Props {
   players: Player[];
@@ -13,6 +14,7 @@ interface Props {
 }
 
 export function ConfigurationTab({ players, startingFive, locked, onSaveStartingFive, statistics, onToggleStatistic }: Props) {
+  const [taggingMode, setTaggingMode] = useTaggingMode();
   const [draft, setDraft] = useState(startingFive);
   const [saved, setSaved] = useState(false);
   const valid = draft.length === 5 && draft.every((id) => players.some((player) => player.id === id));
@@ -20,6 +22,13 @@ export function ConfigurationTab({ players, startingFive, locked, onSaveStarting
   return (
     <section className="panel">
       <h2>Configuration</h2>
+      <h3>Tagging mode</h3>
+      <p>Choose how to record stats. This preference is saved on this device.</p>
+      <div className="tag-mode-selector" role="group" aria-label="Tagging mode">
+        <button type="button" aria-pressed={taggingMode === "typing"} onClick={() => setTaggingMode("typing")}>Typing</button>
+        <button type="button" aria-pressed={taggingMode === "buttons"} onClick={() => setTaggingMode("buttons")}>Buttons</button>
+      </div>
+      <h3>Tracked statistics</h3>
       <p>Stat selections save automatically. Disabled stats are hidden from capture; previously recorded data is kept.</p>
       <div className="statistics-configuration">
         {(["offense", "defense"] as const).map((side) => (

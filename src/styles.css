@@ -61,20 +61,25 @@
 button.portal-secondary { background: transparent; color: var(--ink); border: 1px solid var(--line); }
 .scheduled-game-details { border: 0; padding: 0; margin: 0; min-width: 0; }
 .scheduled-game-details input:disabled, .scheduled-game-details textarea:disabled { opacity: 1; color: var(--ink); background: #f5f0e8; }
-.active-game-header { display: flex; justify-content: space-between; align-items: center; gap: 1rem; margin-bottom: 1rem; }
+.active-game-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 1.25rem; }
 .active-game-header > div { display: grid; gap: 0.25rem; }
 .active-game-header small { color: #6b6255; }
+.active-game-header .game-header-actions { flex: 0 0 270px; justify-items: end; gap: 0.5rem; }
 
-.cloud-controls { border: 0; margin: 0; padding: 0; min-width: 0; }
+.cloud-controls { border: 0; margin: 0; padding: 0; min-width: 0; display: grid; gap: 1.25rem; }
 .cloud-controls:disabled { opacity: 0.75; }
 .cloud-sign-in { display: block; text-align: center; border-radius: 8px; padding: 0.9rem; background: var(--ink); color: #fff; font-weight: 700; text-decoration: none; }
-.save-status { border-radius: 8px; padding: 0.6rem 0.9rem; margin-bottom: 1rem; background: #edf1f5; }
-.save-status.saved { background: #d7f2de; color: #176534; }
-.save-status.offline, .save-status.saving { background: #fff0a6; color: #725100; }
-.save-status.conflict, .save-status.error { background: #fff1f0; color: #8a1c13; }
+.save-status { display: grid; align-content: start; gap: 0.15rem; width: 270px; min-height: 2.75rem; text-align: right; font-size: 0.85rem; line-height: 1.4; }
+.save-status.saved { color: #176534; }
+.save-status.offline, .save-status.saving { color: #725100; }
+.save-status.conflict, .save-status.error { color: #8a1c13; }
+.last-saved { color: var(--ink); font-size: 0.78rem; font-variant-numeric: tabular-nums; }
 .cloud-roster-row { display: grid; grid-template-columns: 24px 90px minmax(100px, 1fr) auto; gap: 0.5rem; margin: 0.6rem 0; align-items: center; }
 .cloud-roster-row input { min-width: 0; }
 @media (max-width: 600px) {
+  .active-game-header { flex-direction: column; }
+  .active-game-header .game-header-actions { flex-basis: auto; width: 100%; grid-template-columns: auto 1fr; align-items: start; }
+  .save-status { width: auto; min-height: 2.75rem; }
   .cloud-roster-row { grid-template-columns: 24px 60px minmax(80px, 1fr); }
   .cloud-roster-row button { grid-column: 2 / -1; }
 }
@@ -289,7 +294,7 @@ button:hover {
 .global-metrics {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 0.55rem;
+  gap: 1rem;
 }
 
 .global-metrics article {
@@ -434,6 +439,7 @@ button:hover {
 
 .candidate-nav {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.6rem;
 }
 
@@ -459,7 +465,7 @@ button:hover {
 .candidate {
   display: grid;
   grid-template-columns: 1.4fr 1fr;
-  gap: 0.8rem;
+  gap: 1.25rem;
 }
 
 .panel {

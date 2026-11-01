@@ -10,6 +10,7 @@ export class SessionSync {
   readonly key: string;
   state: SessionState;
   status: SaveStatus = "saved";
+  lastSavedAt: string;
   error = "";
   private journal: Journal;
   private timer: ReturnType<typeof setTimeout> | undefined;
@@ -35,6 +36,7 @@ export class SessionSync {
       if (saved.operations.length) this.journal = saved;
     }
     this.state = this.replay();
+    this.lastSavedAt = this.journal.base.session.updatedAt;
     if (this.journal.operations.length) { this.status = "saving"; this.recovering = true; }
   }
   get pending() { return this.journal.operations.length; }
@@ -79,6 +81,8 @@ export class SessionSync {
         try { this.storage.setItem(this.key, JSON.stringify(next)); }
         catch (e) { storageFailed = true; throw e; }
         this.journal = next;
+        // The time this device received and durably recorded the acknowledgement.
+        this.lastSavedAt = new Date().toISOString();
       } catch (e) {
         const status = (e as { status?: number }).status;
         this.status = storageFailed ? "error" : status === 409 || status === 412 ? "conflict" : status && status < 500 ? "error" : "offline";
