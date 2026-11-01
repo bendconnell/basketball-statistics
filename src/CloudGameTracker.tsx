@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { NavLink, Navigate, Route, Routes, useNavigate } from "react-router-dom";
+import { NavLink, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { api, request } from "./lib/api";
 import type { CloudCompetition, CloudGame } from "./lib/api";
 import type { LocalAccount } from "./lib/competitions";
@@ -45,6 +45,7 @@ export function CloudGameTracker(props: Props) {
 
 function SessionView({ account, game, competition, onExit, sync, onReload }: Props & { sync: SessionSync; onReload: () => void }) {
   const navigate = useNavigate();
+  const { pathname } = useLocation();
   const [, render] = useState(0);
   const [error, setError] = useState("");
   const [reviewId, setReviewId] = useState(sync.state.possessions.at(-1)!.id);
@@ -135,7 +136,8 @@ function SessionView({ account, game, competition, onExit, sync, onReload }: Pro
   const draftValid = draftRoster.every(p => p.name.trim() && Number.isInteger(p.number) && p.number >= 0 && p.number <= 999)
     && new Set(draftRoster.map(p => p.number)).size === draftRoster.length;
   const rosterValid = draftRoster.length >= 5 && draftValid && starters.length === 5;
-  return <div className="app-shell">
+  const fitScreen = state.sessionStarted && pathname === "/tagging" && !chooseSide;
+  return <div className={`app-shell cloud-game-shell${fitScreen ? " screen-fit" : ""}`}>
     <header className="active-game-header"><div><small>{competition.name} · Master: {account.name}</small><strong>{game.gameTitle} · {game.teamName} vs {game.opponentName}</strong><small>{game.gameDate} · {game.gameTime} · {game.venue}</small></div><div className="game-header-actions"><button type="button" onClick={() => void leave()}>← Sessions</button><div className={`save-status ${sync.status}`} role="status" aria-live="polite" aria-atomic="true">
       <span>{sync.status === "saved" ? "Saved" : sync.status === "saving" ? `Saving… (${sync.pending} pending)` : sync.status === "offline" ? "Offline — changes kept on this device" : sync.status === "conflict" ? "Conflict — reload required" : "Save needs attention"}</span>
       <span className="last-saved">Last saved <time dateTime={sync.lastSavedAt} title={new Date(sync.lastSavedAt).toLocaleString()}>{new Date(sync.lastSavedAt).toLocaleTimeString()}</time></span>
@@ -144,7 +146,7 @@ function SessionView({ account, game, competition, onExit, sync, onReload }: Pro
     {sync.status === "offline" || sync.status === "conflict" || sync.status === "error" ? <div className="action-row"><button type="button" onClick={() => void sync.retry()}>Retry save</button><button type="button" onClick={download}>Export pending changes</button>{sync.blocked ? <button type="button" onClick={() => {
       if (window.confirm("Discard this device's pending changes and reload the server record? Export them first if needed.")) { try { sync.discardPending(); onReload(); } catch (e) { setError((e as Error).message); } }
     }}>Discard pending and reload</button> : null}</div> : null}
-    <fieldset className="cloud-controls" disabled={sync.blocked}>
+    <fieldset className={`cloud-controls${fitScreen ? " screen-fit-controls" : ""}`} disabled={sync.blocked}>
       {!state.sessionStarted ? <section className="panel setup-panel"><h1>Game Setup</h1><p>Add your roster and select the starting five. Schedule details are managed by the administrator.</p>
         {draftRoster.map(p => <div className="cloud-roster-row" key={p.id}><input type="checkbox" aria-label={`Start ${p.name || "player"}`} checked={starters.includes(p.id)} disabled={starters.length === 5 && !starters.includes(p.id)} onChange={e => setStarters(e.target.checked ? [...starters, p.id] : starters.filter(id => id !== p.id))} /><input type="number" min="0" max="999" aria-label="Jersey number" value={Number.isFinite(p.number) ? p.number : ""} onChange={e => setDraftRoster(draftRoster.map(player => player.id === p.id ? { ...player, number: e.target.value === "" ? NaN : Number(e.target.value) } : player))} /><input aria-label="Player name" value={p.name} onChange={e => setDraftRoster(draftRoster.map(player => player.id === p.id ? { ...player, name: e.target.value } : player))} /><button type="button" onClick={() => { setDraftRoster(draftRoster.filter(player => player.id !== p.id)); setStarters(starters.filter(id => id !== p.id)); }}>Remove</button></div>)}
         <div className="action-row"><button type="button" disabled={draftRoster.length >= 100} onClick={() => setDraftRoster([...draftRoster, { id: crypto.randomUUID(), number: NaN, name: "" }])}>Add player</button><button type="button" onClick={() => {

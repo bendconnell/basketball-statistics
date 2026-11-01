@@ -61,19 +61,20 @@
 button.portal-secondary { background: transparent; color: var(--ink); border: 1px solid var(--line); }
 .scheduled-game-details { border: 0; padding: 0; margin: 0; min-width: 0; }
 .scheduled-game-details input:disabled, .scheduled-game-details textarea:disabled { opacity: 1; color: var(--ink); background: #f5f0e8; }
-.active-game-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 1.25rem; }
+.active-game-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 1.25rem; padding: 0.85rem 1rem; border: 1px solid var(--line); border-radius: 16px; background: var(--panel); color: var(--ink); }
 .active-game-header > div { display: grid; gap: 0.25rem; }
-.active-game-header small { color: #6b6255; }
+.active-game-header small { color: #51483c; font-size: 0.85rem; }
+.active-game-header strong { font-size: 1.05rem; }
 .active-game-header .game-header-actions { flex: 0 0 270px; justify-items: end; gap: 0.5rem; }
 
 .cloud-controls { border: 0; margin: 0; padding: 0; min-width: 0; display: grid; gap: 1.25rem; }
 .cloud-controls:disabled { opacity: 0.75; }
 .cloud-sign-in { display: block; text-align: center; border-radius: 8px; padding: 0.9rem; background: var(--ink); color: #fff; font-weight: 700; text-decoration: none; }
 .save-status { display: grid; align-content: start; gap: 0.15rem; width: 270px; min-height: 2.75rem; text-align: right; font-size: 0.85rem; line-height: 1.4; }
-.save-status.saved { color: #176534; }
+.save-status.saved { color: #176534; font-weight: 700; }
 .save-status.offline, .save-status.saving { color: #725100; }
 .save-status.conflict, .save-status.error { color: #8a1c13; }
-.last-saved { color: var(--ink); font-size: 0.78rem; font-variant-numeric: tabular-nums; }
+.last-saved { color: #51483c; font-size: 0.85rem; font-weight: 500; font-variant-numeric: tabular-nums; }
 .cloud-roster-row { display: grid; grid-template-columns: 24px 90px minmax(100px, 1fr) auto; gap: 0.5rem; margin: 0.6rem 0; align-items: center; }
 .cloud-roster-row input { min-width: 0; }
 @media (max-width: 600px) {
@@ -459,6 +460,7 @@ button:hover {
 }
 
 .candidate-stage {
+  min-width: 0;
   min-height: 60vh;
 }
 
@@ -469,6 +471,7 @@ button:hover {
 }
 
 .panel {
+  min-width: 0;
   border: 1px solid var(--line);
   border-radius: 18px;
   background: var(--panel);
@@ -818,6 +821,7 @@ tbody tr.selected td:first-child {
 
 .recent-list li {
   justify-content: flex-start;
+  flex-wrap: wrap;
 }
 
 .recent-list strong {
@@ -1375,6 +1379,49 @@ tbody tr.selected td:first-child {
   .event-composer.inline,
   .event-composer.stack {
     grid-template-columns: 1fr;
+  }
+}
+
+/* Keep desktop capture within the viewport, without clipping controls or entries.
+   Smaller/shorter screens retain normal document scrolling for accessibility. */
+@media (min-width: 1121px) and (min-height: 600px) {
+  .cloud-game-shell.screen-fit {
+    height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .screen-fit > .active-game-header,
+  .screen-fit > .lineup-error,
+  .screen-fit > .action-row { flex-shrink: 0; }
+
+  .screen-fit-controls {
+    flex: 1;
+    min-height: 0;
+    grid-template-rows: auto auto auto minmax(0, 1fr);
+    gap: 1rem;
+  }
+
+  .screen-fit-controls > .candidate-stage {
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .screen-fit-controls .candidate-console {
+    height: 100%;
+    min-height: 0;
+  }
+
+  .screen-fit-controls .recent-panel {
+    max-height: none;
+    overflow: hidden;
+  }
+
+  .screen-fit-controls .command-panel {
+    min-height: 0;
+    overflow: auto;
+    scrollbar-gutter: stable;
   }
 }
 
