@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Navigate, NavLink, Route, Routes, useNavigate } from "react-router-dom";
+import { Navigate, NavLink, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { players as seedPlayers } from "./data/seed";
 import {
   totalOffensiveRebounds,
@@ -8,7 +8,7 @@ import {
   totalPointsFor,
   totalTurnovers
 } from "./lib/metrics";
-import type { EventDraft, LineupStint, Player, Possession, PossessionCloseData, PossessionDetailsData, ScoreAssist, SubstitutionEvent } from "./types";
+import type { EventDraft, LineupStint, Player, Possession, PossessionSide, PossessionCloseData, PossessionDetailsData, ScoreAssist, SubstitutionEvent } from "./types";
 import { updateScoreAssist } from "./lib/scoreAssist";
 import { undoEmptyPossessionToggle } from "./lib/possessionToggle";
 import { changeLineup } from "./lib/lineups";
@@ -144,6 +144,7 @@ function LocalApp() {
 
 function GameTracker({ game, competition, onExit }: { game: ScheduledGame; competition: Competition; onExit: () => void }) {
   const navigate = useNavigate();
+  const { pathname } = useLocation();
   const [sessionStarted, setSessionStarted] = useState(false);
   const [statistics, setStatistics] = useState(loadStatisticsConfiguration);
   useEffect(() => {
@@ -266,8 +267,9 @@ function GameTracker({ game, competition, onExit }: { game: ScheduledGame; compe
     };
   }, [possessions]);
 
-  const addEvent = (possessionId: string, draft: EventDraft) => {
-    if (!possessions.some((possession) => possession.id === possessionId)) return;
+  const addEvent = (possessionId: string, draft: EventDraft, pendingPossession = false) => {
+    // Side inference can queue a new possession earlier in the same React batch.
+    if (!pendingPossession && !possessions.some((possession) => possession.id === possessionId)) return;
     if (!clockRunning && draft.type !== "possession_end") {
       setClockNudge((current) => current + 1);
     }
@@ -337,7 +339,7 @@ function GameTracker({ game, competition, onExit }: { game: ScheduledGame; compe
       setPossessions(restored);
       setSelectedPossessionId(reopened.id);
       setInitialPossessionSide(reopened.side ?? (initialPossessionSide === "offense" ? "defense" : "offense"));
-      return;
+      return reopened.id;
     }
     const createdId = nextPossessionId(possessions);
     const side = data.side ?? initialPossessionSide;
@@ -368,6 +370,18 @@ function GameTracker({ game, competition, onExit }: { game: ScheduledGame; compe
     ]);
     setSelectedPossessionId(createdId);
     setInitialPossessionSide(nextSide);
+    return createdId;
+  };
+
+  const chooseButtonSide = (side: PossessionSide) => {
+    const active = possessions[possessions.length - 1];
+    if (!active) return;
+    return side === initialPossessionSide ? active.id : endPossession({ side: initialPossessionSide });
+  };
+
+  const recordButtonEvent = (side: PossessionSide, draft: EventDraft) => {
+    const id = chooseButtonSide(side);
+    if (id) return addEvent(id, draft, true);
   };
 
   const updatePossessionDetails = (id: string, data: PossessionDetailsData) => {
@@ -660,7 +674,7 @@ function GameTracker({ game, competition, onExit }: { game: ScheduledGame; compe
   }
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell game-workspace${pathname === "/tagging" ? " tagging-workspace" : pathname === "/substitutions" ? " substitutions-workspace" : ""}`}>
       <header className="active-game-header">
         <div><small>{competition.name}</small><strong>{game.gameTitle} · {game.teamName} vs {game.opponentName}</strong><small>{game.gameDate} · {game.gameTime} · {game.venue}</small></div>
         <button type="button" className="portal-secondary" onClick={() => {
@@ -783,6 +797,14 @@ function GameTracker({ game, competition, onExit }: { game: ScheduledGame; compe
                 onSelectPossession={setSelectedPossessionId}
                 onAddEvent={addEvent}
                 onEndPossession={endPossession}
+                onChooseButtonSide={(side) => Boolean(chooseButtonSide(side))}
+                onRecordButtonEvent={recordButtonEvent}
+                onUpdateButtonAssist={(scoreId, assist) => {
+                  if (assist.status === "player" && !onCourtLineup.includes(assist.playerId)) return;
+                  const assistEventId = makeEventId();
+                  setPossessions(current => current.map(p => p.events.some(e => e.id === scoreId)
+                    ? { ...p, events: updateScoreAssist(p.events, scoreId, assist, assistEventId) } : p));
+                }}
                 currentClock={currentClock}
                 possessionSide={initialPossessionSide}
                 onCourtLineup={onCourtLineup}

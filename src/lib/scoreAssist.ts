@@ -6,10 +6,14 @@ export function updateScoreAssist(events: GameEvent[], scoreId: string, assist: 
   const updated = events.filter((event) => event.linkedScoreId !== scoreId)
     .map((event) => event.id === scoreId ? { ...event, assist } : event);
   if (assist.status === "player") {
-    updated.push({
+    const linkedAssist: GameEvent = {
       id: assistEventId, type: "assist", playerId: assist.playerId,
       clock: score.clock, lineupStintId: score.lineupStintId, linkedScoreId: scoreId
-    });
+    };
+    // Historical score edits must keep the possession-end boundary last.
+    const boundary = updated.findIndex(event => event.type === "possession_end");
+    if (boundary < 0) updated.push(linkedAssist);
+    else updated.splice(boundary, 0, linkedAssist);
   }
   return updated;
 }

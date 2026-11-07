@@ -7,7 +7,7 @@ import type { SessionMetadata } from "../shared/session";
 import { SessionSync } from "./lib/sessionSync";
 import type { OperationCommand } from "./lib/sessionSync";
 import { changeLineup } from "./lib/lineups";
-import type { EventDraft, Player, ScoreAssist } from "./types";
+import type { EventDraft, Player, PossessionSide, ScoreAssist } from "./types";
 import { CandidateConsole } from "./candidates/CandidateConsole";
 import { CandidateGrid } from "./candidates/CandidateGrid";
 import { ConfigurationTab } from "./candidates/ConfigurationTab";
@@ -133,7 +133,17 @@ function SessionView({ account, game, competition, onExit, sync, onReload }: Pro
   const assist = (possessionId: string, scoreId: string, value: ScoreAssist) => command({ type: "score.assist", payload: { possessionId, scoreId, assist: value, assistEventId: crypto.randomUUID() } });
   const toggle = () => {
     if (!checkpoint()) return;
-    command({ type: "possession.toggle", payload: { clock: currentClock, lineupStintId: sync.state.lineupStints.at(-1)?.id, lineupIds: sync.state.onCourtLineup, endEventId: crypto.randomUUID(), nextPossessionId: `pos-${String(sync.revision + 1).padStart(2, "0")}` } });
+    return command({ type: "possession.toggle", payload: { clock: currentClock, lineupStintId: sync.state.lineupStints.at(-1)?.id, lineupIds: sync.state.onCourtLineup, endEventId: crypto.randomUUID(), nextPossessionId: `pos-${String(sync.revision + 1).padStart(2, "0")}` } });
+  };
+  const chooseButtonSide = (side: PossessionSide) => !sync.blocked && (sync.state.currentSide === side || toggle() === true);
+  const recordButtonEvent = (side: PossessionSide, draft: EventDraft) => {
+    if (!chooseButtonSide(side)) return;
+    return addEvent(sync.state.possessions.at(-1)!.id, draft);
+  };
+  const updateButtonAssist = (scoreId: string, value: ScoreAssist) => {
+    const possession = sync.state.possessions.find(p => p.events.some(e => e.id === scoreId));
+    if (possession) assist(possession.id, scoreId, value);
+    else setError("The selected score is no longer available for an assist.");
   };
   const lineup = (ids: string[], substitutions = state.substitutions, opening = false) => {
     const stints = changeLineup(state.lineupStints, ids, active.quarter, currentClock, crypto.randomUUID());
@@ -144,7 +154,7 @@ function SessionView({ account, game, competition, onExit, sync, onReload }: Pro
     && new Set(draftRoster.map(p => p.number)).size === draftRoster.length;
   const rosterValid = draftRoster.length >= 5 && draftValid && starters.length === 5;
   const fitScreen = state.sessionStarted && pathname === "/tagging";
-  return <div className={`app-shell cloud-game-shell${fitScreen ? " screen-fit" : ""}`}>
+  return <div className={`app-shell cloud-game-shell${state.sessionStarted ? " game-workspace" : ""}${fitScreen ? " screen-fit tagging-workspace" : state.sessionStarted && pathname === "/substitutions" ? " substitutions-workspace" : ""}`}>
     <header className="active-game-header"><div><small>{competition.name} · Master: {account.name}</small><strong>{game.gameTitle} · {game.teamName} vs {game.opponentName}</strong><small>{game.gameDate} · {game.gameTime} · {game.venue}</small></div><div className="game-header-actions"><button type="button" onClick={() => void leave()}>← Sessions</button><div className={`save-status ${sync.status}`} role="status" aria-live="polite" aria-atomic="true">
       <span>{sync.status === "saved" ? "Saved" : sync.status === "saving" ? `Saving… (${sync.pending} pending)` : sync.status === "offline" ? "Offline — changes kept on this device" : sync.status === "conflict" ? "Conflict — reload required" : "Save needs attention"}</span>
       <span className="last-saved">Last saved <time dateTime={sync.lastSavedAt} title={new Date(sync.lastSavedAt).toLocaleString()}>{new Date(sync.lastSavedAt).toLocaleTimeString()}</time></span>
@@ -154,9 +164,33 @@ function SessionView({ account, game, competition, onExit, sync, onReload }: Pro
       if (window.confirm("Discard this device's pending changes and reload the server record? Export them first if needed.")) { try { sync.discardPending(); onReload(); } catch (e) { setError((e as Error).message); } }
     }}>Discard pending and reload</button> : null}</div> : null}
     <fieldset className={`cloud-controls${fitScreen ? " screen-fit-controls" : ""}`} disabled={sync.blocked}>
-      {!state.sessionStarted ? <section className="panel setup-panel"><h1>Game Setup</h1><p>Add your roster and select the starting five. Schedule details are managed by the administrator.</p>
-        {draftRoster.map(p => <div className="cloud-roster-row" key={p.id}><input type="checkbox" aria-label={`Start ${p.name || "player"}`} checked={starters.includes(p.id)} disabled={starters.length === 5 && !starters.includes(p.id)} onChange={e => setStarters(e.target.checked ? [...starters, p.id] : starters.filter(id => id !== p.id))} /><input type="number" min="0" max="999" aria-label="Jersey number" value={Number.isFinite(p.number) ? p.number : ""} onChange={e => setDraftRoster(draftRoster.map(player => player.id === p.id ? { ...player, number: e.target.value === "" ? NaN : Number(e.target.value) } : player))} /><input aria-label="Player name" value={p.name} onChange={e => setDraftRoster(draftRoster.map(player => player.id === p.id ? { ...player, name: e.target.value } : player))} /><button type="button" onClick={() => { setDraftRoster(draftRoster.filter(player => player.id !== p.id)); setStarters(starters.filter(id => id !== p.id)); }}>Remove</button></div>)}
-        <div className="action-row"><button type="button" disabled={draftRoster.length >= 100} onClick={() => setDraftRoster([...draftRoster, { id: crypto.randomUUID(), number: NaN, name: "" }])}>Add player</button><button type="button" onClick={() => {
+      {!state.sessionStarted ? <section className="panel setup-panel"><h2>Roster</h2><p className="panel-hint">Edit the player list for this game.</p>
+        <div className="roster-editor">
+          <div className="roster-header"><span>Starting 5</span><span>#</span><span>Player Name</span><span>Action</span></div>
+          {draftRoster.map(p => {
+            const invalidNumber = !Number.isInteger(p.number) || p.number < 0 || p.number > 999;
+            const duplicateNumber = draftRoster.some(other => other.id !== p.id && other.number === p.number);
+            const invalidName = !p.name.trim();
+            const invalid = invalidNumber || duplicateNumber || invalidName;
+            return <div className="roster-item" key={p.id}>
+              <div className={`roster-row${invalid ? " invalid" : ""}`}>
+                <label className="roster-starter"><input type="checkbox" aria-label={`Start ${p.name || "player"}`} checked={starters.includes(p.id)} disabled={starters.length === 5 && !starters.includes(p.id)} onChange={e => setStarters(e.target.checked ? [...starters, p.id] : starters.filter(id => id !== p.id))} /><span className="roster-starter-label">Starter</span></label>
+                <input type="number" min="0" max="999" aria-label="Jersey number" aria-invalid={invalidNumber || duplicateNumber} value={Number.isFinite(p.number) ? p.number : ""} onChange={e => setDraftRoster(draftRoster.map(player => player.id === p.id ? { ...player, number: e.target.value === "" ? NaN : Number(e.target.value) } : player))} />
+                <input aria-label="Player name" aria-invalid={invalidName} value={p.name} onChange={e => setDraftRoster(draftRoster.map(player => player.id === p.id ? { ...player, name: e.target.value } : player))} />
+                <button type="button" className="roster-remove-btn" onClick={() => { setDraftRoster(draftRoster.filter(player => player.id !== p.id)); setStarters(starters.filter(id => id !== p.id)); }}>Remove</button>
+              </div>
+              {invalid ? <p className="roster-error">{invalidNumber ? "Jersey number must be between 0 and 999. " : ""}{invalidName ? "Name is required. " : ""}{duplicateNumber ? "Jersey number must be unique." : ""}</p> : null}
+            </div>;
+          })}
+          <div className="roster-actions"><button type="button" disabled={draftRoster.length >= 100} onClick={() => setDraftRoster([...draftRoster, { id: crypto.randomUUID(), number: NaN, name: "" }])}>Add Player</button></div>
+        </div>
+        <p role="status">Starting 5 selected: {starters.length} / 5</p>
+        <button type="button" className="end-possession-btn" disabled={!rosterValid} onClick={() => {
+          const ids = [...starters]; const stints = changeLineup([], ids, 1, currentClock, crypto.randomUUID());
+          if (command({ type: "context.replace", payload: { roster: draftRoster, startingLineupsByQuarter: { 1: ids }, onCourtLineup: ids, lineupStints: stints, sessionStarted: true, clockRunning: false } })) navigate("/configuration");
+        }}>Start Game Session</button>
+        <details className="roster-cloud-options"><summary>Cloud setup options</summary><p>Incomplete rows stay on this device until corrected and saved.</p>
+        <div className="action-row"><button type="button" onClick={() => {
           if (!window.confirm("Import the roster stored in this browser into this session's setup? It won't upload until you start the session.")) return;
           try { const rows = JSON.parse(localStorage.getItem("bball-stats.roster.v2") ?? "[]"); if (!Array.isArray(rows)) throw Error("Invalid local roster"); setDraftRoster(rows.slice(0, 100).map(p => ({ id: crypto.randomUUID(), name: String(p.name ?? ""), number: typeof p.number === "number" ? p.number : NaN }))); setStarters([]); } catch (e) { setError((e as Error).message); }
         }}>Import local roster</button><button type="button" disabled={loadingDefaults} onClick={async () => {
@@ -168,10 +202,7 @@ function SessionView({ account, game, competition, onExit, sync, onReload }: Pro
           setLoadingDefaults(true);
           try { const old = await api.preferences(); await request("me/preferences", "PUT", { roster: draftRoster, statistics: sync.state.statistics }, old.etag ?? undefined, old.etag === null); setError(""); }
           catch (e) { setError((e as Error).message); } finally { setLoadingDefaults(false); }
-        }}>Save account defaults</button></div><p>Starting 5: {starters.length} / 5 · Incomplete rows are kept only on this device until corrected and saved.</p><button type="button" disabled={!rosterValid} onClick={() => {
-          const ids = [...starters]; const stints = changeLineup([], ids, 1, currentClock, crypto.randomUUID());
-          if (command({ type: "context.replace", payload: { roster: draftRoster, startingLineupsByQuarter: { 1: ids }, onCourtLineup: ids, lineupStints: stints, sessionStarted: true, clockRunning: false } })) navigate("/configuration");
-        }}>Start Game Session</button>
+        }}>Save account defaults</button></div></details>
       </section> : <>
         <section className="global-metrics">{([
           ["Score For", totalPointsFor(state.possessions), state.statistics.offense.shot_made], ["Score Against", totalPointsAgainst(state.possessions), state.statistics.defense.opp_score], ["Turnovers", totalTurnovers(state.possessions), state.statistics.offense.turnover], ["Offensive Rebounds", totalOffensiveRebounds(state.possessions), state.statistics.offense.offensive_rebound], ["Opposition Rebounds", totalOppositionRebounds(state.possessions), state.statistics.defense.opposition_rebound]
@@ -179,7 +210,7 @@ function SessionView({ account, game, competition, onExit, sync, onReload }: Pro
         <section className="clock-panel" aria-label="Game clock and active possession"><div className="clock-time"><p className="clock-big">{currentClock}</p><span>Time</span></div><div className="active-possession"><strong className="possession-number">{state.possessions.length}</strong><span>Possession</span></div><div className="clock-buttons"><button type="button" className={`clock-toggle-btn ${state.clockRunning ? "is-stop" : "is-start"}${!state.clockRunning && nudge ? ` clock-nudge-${nudge % 2 ? "odd" : "even"}` : ""}`} onClick={() => { setNudge(0); if (state.clockRunning) checkpoint(false); else if (seconds === 600) setChooseSide(true); else checkpoint(true); }}>{state.clockRunning ? "Stop" : "Start"}</button>{[-1, 1].map(delta => <button type="button" key={delta} disabled={state.clockRunning || seconds + delta < 0 || seconds + delta > 3600} onClick={() => { const next = seconds + delta; if (command({ type: "context.replace", payload: { clockSeconds: next } })) { secondsRef.current = next; setSeconds(next); } }}>{delta === 1 ? "+1s" : "-1s"}</button>)}<button type="button" disabled={seconds !== 0} onClick={() => { if (command({ type: "context.replace", payload: { clockSeconds: 600, clockRunning: false } })) { secondsRef.current = 600; setSeconds(600); } }}>Reset 10:00</button></div></section>
         <nav className="candidate-nav"><NavLink to="/tagging">Tagging</NavLink><NavLink to="/substitutions">Substitutions</NavLink><NavLink to="/configuration">Configuration</NavLink><NavLink to="/matrix">Possession Matrix</NavLink><NavLink to="/lineups">Lineup Differential</NavLink><NavLink to="/individual">Individual Point Diff</NavLink></nav>
         <main className="candidate-stage"><Routes>
-          <Route path="/tagging" element={<CandidateConsole protectBoundaries players={state.roster} possessions={state.possessions} selectedPossession={active} onSelectPossession={setReviewId} onAddEvent={addEvent} onEndPossession={toggle} currentClock={currentClock} statistics={state.statistics} possessionSide={state.currentSide} onCourtLineup={state.onCourtLineup} onDeleteEvent={(possessionId, eventId) => command({ type: "event.delete", payload: { possessionId, eventId } })} onUpdateScoreAssist={assist} onUpdatePossessionDetails={(possessionId, data) => { command({ type: "possession.details", payload: { possessionId, data } }); }} />} />
+          <Route path="/tagging" element={<CandidateConsole protectBoundaries players={state.roster} possessions={state.possessions} selectedPossession={active} onSelectPossession={setReviewId} onAddEvent={addEvent} onEndPossession={toggle} onChooseButtonSide={chooseButtonSide} onRecordButtonEvent={recordButtonEvent} onUpdateButtonAssist={updateButtonAssist} currentClock={currentClock} statistics={state.statistics} possessionSide={state.currentSide} onCourtLineup={state.onCourtLineup} onDeleteEvent={(possessionId, eventId) => command({ type: "event.delete", payload: { possessionId, eventId } })} onUpdateScoreAssist={assist} onUpdatePossessionDetails={(possessionId, data) => { command({ type: "possession.details", payload: { possessionId, data } }); }} />} />
           <Route path="/configuration" element={<ConfigurationTab players={state.roster} statistics={state.statistics} startingFive={state.startingLineupsByQuarter[1] ?? []} locked={state.clockRunning || seconds !== 600 || state.substitutions.length > 0 || state.possessions.some(p => p.events.length > 0)} onToggleStatistic={(side, key) => { command({ type: "context.replace", payload: { statistics: { ...state.statistics, [side]: { ...state.statistics[side], [key]: state.statistics[side][key] === false } } } }); }} onSaveStartingFive={ids => { lineup(ids, state.substitutions, true); }} />} />
           <Route path="/substitutions" element={<SubstitutionsTab players={state.roster} onCourtLineup={state.onCourtLineup} substitutions={state.substitutions} currentClock={currentClock} currentQuarter={active.quarter} onRecordSubstitutions={pairs => {
             const ids = state.onCourtLineup.map(id => pairs.find(p => p.playerOutId === id)?.playerInId ?? id);

@@ -13,6 +13,9 @@ interface ConsoleProps extends CandidateProps {
   statistics: StatisticsConfiguration;
   possessionSide: PossessionSide;
   onCourtLineup: string[];
+  onChooseButtonSide: (side: PossessionSide) => boolean;
+  onRecordButtonEvent: (side: PossessionSide, draft: EventDraft) => string | void;
+  onUpdateButtonAssist: (scoreId: string, assist: ScoreAssist) => void;
   onDeleteEvent: (possessionId: string, eventId: string) => boolean | void;
   protectBoundaries?: boolean;
   onUpdatePossessionDetails: (id: string, data: PossessionDetailsData) => void;
@@ -24,24 +27,20 @@ export function CandidateConsole({
   possessions,
   selectedPossession,
   onAddEvent: recordStatEvent,
-  onEndPossession,
   currentClock,
   possessionSide,
   onCourtLineup,
+  onChooseButtonSide,
+  onRecordButtonEvent,
+  onUpdateButtonAssist,
   onDeleteEvent,
   protectBoundaries = false,
   statistics,
-  onUpdateScoreAssist,
   onUpdatePossessionDetails
 }: ConsoleProps) {
   const [taggingMode] = useTaggingMode();
   const [chatInput, setChatInput] = useState("");
-  const [sideNudge, setSideNudge] = useState(0);
-  const onAddEvent = (possessionId: string, draft: EventDraft) => {
-    const id = recordStatEvent(possessionId, draft);
-    if (id && draft.type !== "possession_end") setSideNudge((current) => current + 1);
-    return id;
-  };
+  const onAddEvent = recordStatEvent;
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [activeSuggestion, setActiveSuggestion] = useState(-1);
   const chatInputRef = useRef<HTMLInputElement>(null);
@@ -337,33 +336,26 @@ export function CandidateConsole({
       <div className="panel command-panel">
         <div className="tagging-header">
           <h2>Tagging</h2>
-          <div className="side-indicator" aria-live="polite">
-            <button type="button" className={`side-pill tagging-side-toggle ${possessionSide}${sideNudge ? ` side-nudge-${sideNudge % 2 ? "odd" : "even"}` : ""}`}
-              aria-label={`Switch to ${possessionSide === "offense" ? "Defense" : "Offense"} and end current possession`}
-              title="Switch side and end current possession"
-              onAnimationEnd={() => setSideNudge(0)}
-              onClick={() => { setSideNudge(0); onEndPossession({ side: possessionSide }); }}>
-              {possessionSide === "offense" ? "Offense" : "Defense"}
-            </button>
-          </div>
+          <span className="side-indicator" aria-live="polite">Current possession: {possessionSide === "offense" ? "Offense" : "Defense"}</span>
         </div>
         {taggingMode === "buttons" ? (
           <>
             {onCourtPlayers.length !== 5 ? <p className="lineup-error">Select your starting 5 in <Link to="/configuration">Configuration</Link>.</p> : null}
-            <ButtonTagging
-              key={`${selectedPossession?.id}-${possessionSide}-${onCourtLineup.join(",")}-${JSON.stringify(statistics)}`}
-              players={onCourtPlayers}
-              side={possessionSide}
-              statistics={statistics}
-              currentClock={currentClock}
-              onRecord={(draft) => { if (selectedPossession) return onAddEvent(selectedPossession.id, draft); }}
-              onUpdateAssist={(scoreId, assist) => {
-                if (selectedPossession) {
-                  onUpdateScoreAssist(selectedPossession.id, scoreId, assist);
-                  if (assist.status === "player") setSideNudge((current) => current + 1);
-                }
-              }}
-            />
+            <div className="tagging-side-sections">
+              {(["offense", "defense"] as const).map(side => <section key={side} className={`tagging-side-section ${side}`} aria-label={`${side === "offense" ? "Offense" : "Defense"} tagging`}>
+                <h3>{side === "offense" ? "Offense" : "Defense"}</h3>
+                <ButtonTagging
+                  key={`${onCourtLineup.join(",")}-${JSON.stringify(statistics)}`}
+                  players={onCourtPlayers}
+                  side={side}
+                  statistics={statistics}
+                  currentClock={currentClock}
+                  onChooseSide={() => onChooseButtonSide(side)}
+                  onRecord={draft => onRecordButtonEvent(side, draft)}
+                  onUpdateAssist={onUpdateButtonAssist}
+                />
+              </section>)}
+            </div>
           </>
         ) : <div className="chat-command-panel">
           {onCourtPlayers.length === 0 ? (

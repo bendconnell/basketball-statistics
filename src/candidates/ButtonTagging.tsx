@@ -6,6 +6,7 @@ interface Props {
   side: PossessionSide;
   statistics: StatisticsConfiguration;
   currentClock: string;
+  onChooseSide: () => boolean;
   onRecord: (event: EventDraft) => string | void;
   onUpdateAssist: (scoreId: string, assist: ScoreAssist) => void;
 }
@@ -16,16 +17,21 @@ type Step =
   | { kind: "player"; type: EventType; label: string; points?: number }
   | { kind: "assist"; scorerId: string; scoreId: string };
 
-export function ButtonTagging({ players, side, statistics, currentClock, onRecord, onUpdateAssist }: Props) {
+export function ButtonTagging({ players, side, statistics, currentClock, onChooseSide, onRecord, onUpdateAssist }: Props) {
   const [step, setStep] = useState<Step>({ kind: "home" });
   const [feedback, setFeedback] = useState("");
   const enabled = (type: EventType) => statistics[side][type] !== false;
   const record = (type: EventType, playerId: string, points?: number, clock = currentClock) => {
     const eventId = onRecord({ type, playerId, points, clock });
+    if (!eventId) {
+      setFeedback("Unable to record this stat. Check the session save status and try again.");
+      return;
+    }
     setFeedback(`${type.replaceAll("_", " ")} recorded${playerId === "__opposition__" ? "." : ` for #${players.find((player) => player.id === playerId)?.number}.`}`);
     return eventId;
   };
   const playerAction = (type: EventType, label: string) => {
+    if (!onChooseSide()) return;
     setFeedback("");
     setStep({ kind: "player", type, label });
   };
@@ -39,10 +45,11 @@ export function ButtonTagging({ players, side, statistics, currentClock, onRecor
         <>
           <div className="tag-action-grid">
             {enabled(side === "offense" ? "shot_made" : "opp_score") ? (
-              <button type="button" onClick={() => { setFeedback(""); setStep({ kind: "points", type: side === "offense" ? "shot_made" : "opp_score" }); }}>Score</button>
+              <button type="button" onClick={() => { if (!onChooseSide()) return; setFeedback(""); setStep({ kind: "points", type: side === "offense" ? "shot_made" : "opp_score" }); }}>Score</button>
             ) : null}
             {enabled(side === "offense" ? "shot_miss" : "opposition_miss") ? (
               <button type="button" onClick={() => {
+                if (!onChooseSide()) return;
                 setFeedback("");
                 setStep({ kind: "points", type: side === "offense" ? "shot_miss" : "opposition_miss" });
               }}>Miss</button>
