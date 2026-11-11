@@ -9,7 +9,7 @@ export function undoEmptyPossessionToggle(
   const boundary = previous.events[previous.events.length - 1];
   if (active.completed || active.events.length || active.pointsFor || active.pointsAgainst
     || active.passCount != null || active.hadPaintTouch != null || active.wasFastBreak != null
-    || !previous.completed || boundary?.type !== "possession_end"
+    || !previous.completed || previous.explicitlyEnded || boundary?.type !== "possession_end"
     || previous.quarter !== active.quarter || previous.side === active.side
     || boundary.lineupStintId !== currentLineupStintId) return null;
 

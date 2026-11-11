@@ -293,7 +293,7 @@ test("OpenAPI parses and includes all implemented paths and operation discrimina
   const spec = parseYaml(await readFile(new URL("../openapi.yaml", import.meta.url), "utf8"), { merge: true });
   assert.equal(spec.openapi, "3.1.0");
   for (const path of ["/v1/me", "/v1/users", "/v1/competitions", "/v1/competitions/{id}", "/v1/competitions/{id}/games", "/v1/games/{id}", "/v1/competitions/{id}/subscriptions/{userId}", "/v1/me/preferences", "/v1/games/{id}/sessions", "/v1/sessions/{id}/snapshot", "/v1/sessions/{id}/operations", "/v1/health"]) assert.ok(spec.paths[path]);
-  assert.equal(spec.components.schemas.OperationInput.oneOf.length, 6);
+  assert.equal(spec.components.schemas.OperationInput.oneOf.length, 10);
   assert.ok(spec.components.schemas.SessionState.properties.roster);
   function checkRefs(value) {
     if (!value || typeof value !== "object") return;
@@ -315,4 +315,80 @@ test("miss attempt points persist through API log replay without changing either
   const loaded = (await f.service.handle("GET", `v1/sessions/${session.id}/snapshot`, headers(user))).body;
   assert.deepEqual(loaded.state.possessions[0].events.map(e => e.points), [3, 3]);
   assert.equal(loaded.state.possessions[0].pointsFor, 0); assert.equal(loaded.state.possessions[0].pointsAgainst, 0);
+});
+
+test("boundary merge and undo preserve stats, metadata and stale-undo protection", () => {
+  let state = started();
+  state = apply(state, "event.add", { possessionId: "pos-01", event: { id: "score", type: "shot_made", playerId: "p-1", clock: "09:50", points: 2 } });
+  state = apply(state, "possession.toggle", { clock: "09:40", lineupStintId: "stint-1", lineupIds: setup.onCourtLineup, endEventId: "end", nextPossessionId: "pos-02" });
+  state = apply(state, "event.add", { possessionId: "pos-02", event: { id: "opp", type: "opp_score", playerId: "", clock: "09:30", points: 3 } });
+  state = apply(state, "possession.details", { possessionId: "pos-02", data: { passCount: 0, paintTouch: false } });
+  const original = state;
+  const merged = apply(state, "possession.boundary.delete", { possessionId: "pos-01", eventId: "end" });
+  assert.equal(merged.possessions.length, 1);
+  assert.equal(merged.possessions[0].pointsFor, 2);
+  assert.equal(merged.possessions[0].pointsAgainst, 3);
+  assert.equal(original.possessions.length, 2);
+  const ticked = apply(merged, "context.replace", { clockSeconds: 560 });
+  const undo = apply(ticked, "possession.boundary.undo", { endEventId: "restored-end", nextPossessionId: "pos-03" });
+  assert.equal(undo.possessions.length, 2);
+  assert.equal(undo.possessions[1].passCount, 0);
+  assert.equal(undo.possessions[1].hadPaintTouch, false);
+  assert.equal(undo.clockSeconds, 560);
+  const edited = apply(merged, "event.add", { possessionId: "pos-01", event: { id: "new-stat", type: "turnover", playerId: "p-1", clock: "09:20" } });
+  assert.throws(() => apply(edited, "possession.boundary.undo", { endEventId: "undo-end", nextPossessionId: "pos-04" }), /No possession deletion/);
+  assert.throws(() => apply(state, "possession.boundary.delete", { possessionId: "pos-01", eventId: "score" }), /Missing possession boundary/);
+});
+
+test("reset is durable, deduplicated, retains setup and requires fresh IDs", async () => {
+  const f = await fixture(), session = await createSession(f);
+  const write = op => f.service.handle("POST", `v1/sessions/${session.id}/operations`, headers(user), op);
+  await write(operation("context.replace", { ...setup, startingLineupsByQuarter: { 1: setup.onCourtLineup } }));
+  await write(operation("event.add", { possessionId: "pos-01", event: { id: "scored", playerId: "p-1", type: "shot_made", clock: "09:00", points: 3 } }, 1));
+  const op = operation("game.reset", { confirmed: true, possessionId: "reset-pos", stintId: "reset-stint" }, 2);
+  assert.equal((await write(op)).body.revision, 3);
+  assert.equal((await write(op)).body.revision, 3);
+  const loaded = (await f.service.handle("GET", `v1/sessions/${session.id}/snapshot`, headers(user))).body;
+  assert.equal(loaded.state.clockSeconds, 600);
+  assert.equal(loaded.state.clockRunning, false);
+  assert.equal(loaded.state.possessions[0].pointsFor, 0);
+  assert.deepEqual(loaded.state.roster, setup.roster);
+  assert.deepEqual(loaded.state.onCourtLineup, setup.onCourtLineup);
+  assert.equal(loaded.state.lineupStints[0].id, "reset-stint");
+  await assert.rejects(write(operation("game.reset", { confirmed: true, possessionId: "pos-01", stintId: "reuse-stint" }, 3)), e => e.code === "id_reused");
+  assert.throws(() => parseOperation(operation("game.reset", { confirmed: false, possessionId: "new", stintId: "stint-new" }, 3)));
+});
+
+test("entry Undo restores linked assists, historical position and clock-safe state", () => {
+  let state = apply(started(), "event.add", { possessionId: "pos-01", event: { id: "undo-score", type: "shot_made", playerId: "p-1", clock: "09:50", points: 3 } });
+  state = apply(state, "score.assist", { possessionId: "pos-01", scoreId: "undo-score", assist: { status: "player", playerId: "p-2" }, assistEventId: "undo-assist" });
+  state = apply(state, "possession.toggle", { clock: "09:40", lineupStintId: "stint-1", lineupIds: setup.onCourtLineup, endEventId: "undo-boundary", nextPossessionId: "undo-next" });
+  const deleted = apply(state, "event.delete", { possessionId: "pos-01", eventId: "undo-score" });
+  assert.equal(deleted.possessions[0].pointsFor, 0);
+  const ticked = apply(deleted, "context.replace", { clockSeconds: 550 });
+  const restored = apply(ticked, "event.undo", { eventIds: ["fresh-score", "fresh-assist"] });
+  assert.equal(restored.clockSeconds, 550);
+  assert.equal(restored.possessions[0].pointsFor, 3);
+  assert.equal(restored.possessions[0].events.at(-1).id, "undo-boundary");
+  assert.equal(restored.possessions[0].events.find(e => e.type === "assist").linkedScoreId, "fresh-score");
+  assert.equal(restored.eventUndo, undefined);
+  const assistDeleted = apply(restored, "event.delete", { possessionId: "pos-01", eventId: "fresh-assist" });
+  assert.equal(assistDeleted.possessions[0].events[0].assist.status, "unknown");
+  const assistRestored = apply(assistDeleted, "event.undo", { eventIds: ["new-assist"] });
+  assert.equal(assistRestored.possessions[0].events[0].assist.status, "player");
+  assert.throws(() => apply(deleted, "event.undo", { eventIds: ["one-id"] }), /do not match/);
+  assert.throws(() => apply(deleted, "event.undo", { eventIds: ["same-id", "same-id"] }), /Duplicate ID/);
+  const edited = apply(deleted, "possession.details", { possessionId: "pos-01", data: { passCount: 2 } });
+  assert.throws(() => apply(edited, "event.undo", { eventIds: ["later-score", "later-assist"] }), /No entry deletion/);
+});
+
+test("explicit ending retains stat-free possessions through subsequent side changes", () => {
+  const end = (state, side, suffix) => apply(state, "possession.toggle", { clock: "10:00", lineupStintId: "stint-1", lineupIds: setup.onCourtLineup, endEventId: `explicit-end-${suffix}`, nextPossessionId: `explicit-pos-${suffix}`, ...(side ? { explicitSide: side } : {}) });
+  let state = end(started(), "offense", "one");
+  state = end(state, "defense", "two");
+  assert.equal(state.possessions.length, 3);
+  assert.deepEqual(state.possessions.slice(0, 2).map(p => p.events.map(e => e.type)), [["possession_end"], ["possession_end"]]);
+  state = end(state, null, "three");
+  assert.equal(state.possessions.length, 4, "Implicit change cannot reopen a manually ended empty possession");
+  assert.equal(state.possessions[1].explicitlyEnded, true);
 });

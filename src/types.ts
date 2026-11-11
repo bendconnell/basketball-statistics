@@ -49,6 +49,7 @@ export interface Possession {
   wasFastBreak?: boolean | null;
   side?: PossessionSide;
   completed?: boolean;
+  explicitlyEnded?: boolean;
   detailsEdited?: boolean;
 }
 

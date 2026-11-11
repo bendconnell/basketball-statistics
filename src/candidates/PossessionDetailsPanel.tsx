@@ -49,13 +49,12 @@ export function PossessionDetailsPanel({ possessions, onUpdate, editRequest, sta
         }
       }}
     >
-      <h3 id="possession-details-title">Possession {formatPossessionId(selected.id)} details</h3>
+      <h3 id="possession-details-title">Possession {formatPossessionId(selected.id, possessions)} details</h3>
       <p className="panel-hint">Q{selected.quarter} · {selected.startClock} to {selected.endClock} · {selected.side ?? "Side unknown"}</p>
       <div className="possession-details-content">
         <p id="possession-details-description" className="panel-hint">Saved automatically. Leave anything you did not observe as Unknown. This never ends or changes the active possession.</p>
 
-        {selected.side !== "defense" ? (
-          <>
+        {selected.side !== "defense" ? <>
             {enabled.pass !== false ? (
             <fieldset>
               <legend>Number of passes</legend>
@@ -97,8 +96,7 @@ export function PossessionDetailsPanel({ possessions, onUpdate, editRequest, sta
               </div>
             </fieldset>
             ) : null}
-          </>
-        ) : null}
+          </> : null}
 
         {enabled.fast_break !== false ? <fieldset>
           <legend>{selected.side === "defense" ? "Fast break against" : "Fast break"}</legend>
@@ -118,7 +116,10 @@ export function PossessionDetailsPanel({ possessions, onUpdate, editRequest, sta
           <p>No possession-detail stats enabled for this side.</p>
         ) : null}
       </div>
-      <button type="button" onClick={() => dialogRef.current?.close()}>Done</button>
+      <div className="modal-actions">
+        <button type="button" onClick={() => dialogRef.current?.close()}>Later</button>
+        <button type="button" onClick={() => dialogRef.current?.close()}>Done</button>
+      </div>
     </dialog>
   );
 }

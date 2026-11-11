@@ -12,7 +12,8 @@ export function uiPreviewPlugin() {
         const { MemoryRepository } = await server.ssrLoadModule("/api/src/repository.ts");
         const { players } = await server.ssrLoadModule("/src/data/seed.ts");
         const account = { id: `ui-preview-${randomUUID()}`, name: "UI Preview", role: "administrator" };
-        const service = new ApiService(new MemoryRepository(), [account]);
+        const repo = new MemoryRepository();
+        const service = new ApiService(repo, [account]);
         const headers = new Headers({ "x-ms-client-principal": Buffer.from(JSON.stringify({ identityProvider: "preview", userId: account.id, userRoles: ["authenticated"] })).toString("base64") });
         const competition = (await service.handle("POST", "v1/competitions", headers, { name: "UI design sandbox" })).body;
         const game = (await service.handle("POST", `v1/competitions/${competition.id}/games`, headers, {
@@ -32,7 +33,7 @@ export function uiPreviewPlugin() {
           });
           return (await service.handle("GET", `v1/sessions/${created.id}/snapshot`, headers)).body.session;
         }
-        return { service, headers, account, competition, game, session: await session(true), setup: await session(false) };
+        return { repo, headers, account, competition, game, session: await session(true), setup: await session(false) };
       }
       server.middlewares.use(async (req, res, next) => {
         const url = new URL(req.url ?? "/", "http://127.0.0.1");
@@ -53,7 +54,13 @@ export function uiPreviewPlugin() {
           for await (const chunk of req) { text += chunk; if (text.length > 65536) throw Error("Preview request too large"); }
           const headers = new Headers(data.headers);
           for (const key of ["if-match", "if-none-match"]) if (req.headers[key]) headers.set(key, req.headers[key]);
-          const result = await data.service.handle(req.method, url.pathname.slice(5), headers, text ? JSON.parse(text) : undefined);
+          // Resolve the current SSR module for every request. Holding a seeded
+          // ApiService forever retains its old parser/reducer after frontend HMR.
+          // Keep the repository and account stable so code reloads preserve games
+          // and pending operation envelopes, rather than reseeding the sandbox.
+          const { ApiService } = await server.ssrLoadModule("/api/src/service.ts");
+          const service = new ApiService(data.repo, [data.account]);
+          const result = await service.handle(req.method, url.pathname.slice(5), headers, text ? JSON.parse(text) : undefined);
           res.statusCode = result.status; res.end(result.body === undefined ? undefined : JSON.stringify(result.body));
         } catch (error) {
           res.statusCode = error.status ?? 500;

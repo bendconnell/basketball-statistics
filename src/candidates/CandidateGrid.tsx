@@ -32,7 +32,7 @@ export function CandidateGrid({
                   className={selected ? "selected" : ""}
                   onClick={() => onSelectPossession(possession.id)}
                 >
-                  <td>{formatPossessionId(possession.id)}</td>
+                  <td>{formatPossessionId(possession.id, possessions)}</td>
                   <td>{possession.quarter}</td>
                   <td>{possession.side === "defense" ? "—" : countPasses(possession) === null ? "Unknown" : possession.passCount != null ? possession.passCount < 2 ? "0 or 1" : possession.passCount < 4 ? "2 or 3" : "4+" : countPasses(possession)}</td>
                   <td>{possession.side === "defense" ? "—" : countPaintTouches(possession) === null ? "Unknown" : countPaintTouches(possession) ? "Yes" : "No"}</td>
@@ -52,7 +52,7 @@ export function CandidateGrid({
         {selectedPossession ? (
           <>
             <h2>
-              {formatPossessionId(selectedPossession.id)} | Q{selectedPossession.quarter} {selectedPossession.startClock} to {selectedPossession.endClock}
+              {formatPossessionId(selectedPossession.id, possessions)} | Q{selectedPossession.quarter} {selectedPossession.startClock} to {selectedPossession.endClock}
             </h2>
             <p className="panel-hint">Review possession details in this tab. Use the Tagging tab to register events.</p>
             <p>

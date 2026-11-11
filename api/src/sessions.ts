@@ -24,8 +24,11 @@ function contextIds(state: Pick<SessionState, "roster" | "lineupStints" | "subst
 }
 function claimedIds(op: OperationInput): string[] {
   if (op.type === "event.add") return [op.payload.event.id];
+  if (op.type === "event.undo") return op.payload.eventIds;
   if (op.type === "score.assist") return [op.payload.assistEventId];
   if (op.type === "possession.toggle") return [op.payload.endEventId, op.payload.nextPossessionId];
+  if (op.type === "possession.boundary.undo") return [op.payload.endEventId, op.payload.nextPossessionId];
+  if (op.type === "game.reset") return [op.payload.possessionId, op.payload.stintId];
   if (op.type === "context.replace") return contextIds({ roster: op.payload.roster ?? [], lineupStints: op.payload.lineupStints ?? [], substitutions: op.payload.substitutions ?? [] });
   return [];
 }

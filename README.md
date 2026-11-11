@@ -2,10 +2,20 @@
 
 React/TypeScript basketball live tagging with competition schedules, configurable statistics, starting lineups, substitutions, possession details, and lineup/individual point differential.
 
+For component structure, data flow, security boundaries, storage, and deployment design, see the [architecture README](architecture/README.md).
+
+## Live application
+
+**Azure URL:** [https://green-plant-0b0d20b00.6.azurestaticapps.net](https://green-plant-0b0d20b00.6.azurestaticapps.net)
+
+The hosted application requires sign-in and an approved account. Hosted sign-in and basic cloud save/resume have been verified. The latest UI alignment release was deployed on 2026-11-07 ([deployment run](https://github.com/bendconnell/basketball-statistics/actions/runs/42326978237)).
+
+For login-free UI iteration, run `npm run dev:ui` and visit [http://127.0.0.1:5180/tagging](http://127.0.0.1:5180/tagging). This preview uses the hosted UI components with disposable local data, not Azure data. See [dev/README.md](dev/README.md).
+
 ## Modes
 
 - **Local demo (default):** run `npm install` then `npm run dev`. Demo logins are user/user and admin/admin, not secure authentication. Competitions, roster and settings use browser storage; live demo game events are **not** saved across refresh or exit.
-- **Azure:** build with `VITE_BACKEND_MODE=azure`. Uses same-origin `/api/v1` and managed hosted sign-in. There is no fallback to demo identities if the API fails. Azure resources and hosted authentication have not yet been provisioned or verified.
+- **Azure:** build with `VITE_BACKEND_MODE=azure`. Uses same-origin `/api/v1` and managed hosted sign-in. There is no fallback to demo identities if the API fails. The live URL and current deployment status are documented above.
 
 On Windows PowerShell use `npm.cmd` instead of `npm` where execution policy blocks the PowerShell shim. Use Node **22.12 or newer** (Node 22 LTS for deployment parity). Vite 8 and its React plugin require this runtime floor. The frontend flag is public build configuration, never a place for secrets. See [.env.example](.env.example).
 
@@ -14,9 +24,12 @@ On Windows PowerShell use `npm.cmd` instead of `npm` where execution policy bloc
 Administrators create/edit/archive competitions and games and assign subscriptions. Approved users can subscribe to competitions, select a game, and create or resume their own session. The creator is that session's master; an administrator does **not** gain access to another master's game record merely by being an administrator.
 
 1. Add a roster and select five starters. Import local roster or load account defaults only with an explicit action. Save setup uploads valid rows; unfinished rows and starter choices are kept locally per account/session. Save account defaults explicitly replaces your reusable roster/stat settings using a conditional write.
-2. Start the session and configure enabled statistics. Use Typing or Buttons in Tagging. Scores include Unknown, Not Applicable or a teammate assist; missed shots retain attempted point values without increasing the score.
-3. The master controls the clock, starting lineup, substitutions and possession transitions. An empty side-toggle can undo the latest boundary; historical boundaries cannot be deleted independently in cloud mode. End Possession detail indicators turn from yellow to green after editing.
+2. Start the session and configure enabled statistics. Tagging uses buttons only, with Offense and Defense actions available together and the possession side inferred from the action selected. Scores include Unknown, Not Applicable or a teammate assist; missed shots retain attempted point values without increasing the score.
+3. The master controls the clock, starting lineup, substitutions and possession transitions. Delete a Possession End entry to merge its adjacent possessions in the same quarter without removing recorded stats. The latest deletion can be undone until the next stat or gameplay edit; clock-only updates do not cancel Undo. Merged possession details are marked for review. End Possession detail indicators turn from yellow to green after editing.
 4. Review possessions, actual lineup stints and individual differential. Attribution follows the lineup present when a stat was recorded, not synthetic fixed time windows.
+	Use **End Possession** in Offense or Defense to close it explicitly, even without recorded stats. Its details dialog opens immediately for passes, paint touch and fast break; choose **Later** to leave details unknown and enter them from Possession Entries later. Explicitly ended empty possessions are retained during subsequent inferred side changes.
+	**Undo deletion** appears beside Possession Entries after deleting any entry. It restores the latest deletion, including linked assists and score totals, until the next stat or gameplay edit. Clock-only updates do not expire Undo.
+5. In the local preview, use **UI sandbox · local only → Reset sample data** to start with a fresh disposable sample. Tagging has no Reset Game control.
 
 ## Cloud autosave and recovery
 
@@ -37,6 +50,8 @@ The toolchain uses patched Vite 8.3.5, React plugin 6.1.2, React Router DOM 7.18
 For a **test-only** browser smoke test, build the API and frontend with the Azure flag, then run `node tests/manual-cloud-server.mjs`. Visit http://127.0.0.1:5179/test/login/admin or http://127.0.0.1:5179/test/login/user. The fixture uses the real API service, loopback-only listening and disposable in-memory storage. It deliberately simulates platform identities: **never deploy it or expose it through a tunnel**. It does not test Entra, Azure Storage or the SWA proxy. The regular Vite dev server alone does not provide the cloud API.
 
 ## Azure deployment setup
+
+The provisioning notes below record earlier setup stages; references to pending deployment or identity verification describe that historical stage, not the current live status above.
 
 Pilot resources provisioned on 2026-10-31 in `rg-bball-stats`: `bball-stats` (Static Web Apps Standard, managed API region East Asia) and `bballstatse2049f62` (StorageV2 Standard LRS, Australia East). Storage has HTTPS/TLS 1.2, anonymous Blob access disabled, Blob versioning and 14-day Blob/container soft delete. No Front Door or Defender for Storage was enabled. These are hosting/storage resources, not a verified live application: External ID, storage tables/container, application settings, deployment token and hosted smoke tests are still pending.
 
@@ -97,4 +112,4 @@ Preview separately runs FullResourcePayloads on the **public resource template o
 
 To recreate, retain the same group/name variables and run the infrastructure preview/apply again with valid Entra settings. The existing resource group means resource-group-scoped OIDC permissions and budget survive. In keep-data mode use the retained account; in delete-data mode new storage is empty (restore an external backup if required). Storage names may take time to become reusable. Refresh the new site hostname in `SITE_URL`, the Entra redirect URI `/.auth/login/externalid/callback`, and the GitHub SWA deployment-token secret. Do not assume the hostname/token or approved SWA user IDs survive recreation. Verify identities and approval mapping, enable deployment deliberately, then deploy and smoke-test before accepting stats. Old browser outboxes belong to old session IDs and must not be replayed into unrelated new sessions.
 
-The pipelines are published. Both GitHub environments (`production-infrastructure` and `production`) require `bendconnell` approval and are restricted to main. Production `SITE_URL` is set to `https://green-plant-0b0d20b00.6.azurestaticapps.net`, but identity settings and the deployment-token secret are still absent. No teardown has been executed. Avoid using Azure Portal deletion concurrently with a lifecycle workflow; the concurrency guard only covers GitHub workflow executions.
+The pipelines are published and restricted to main. `production-infrastructure` requires `bendconnell` approval; routine application deployments through `production` no longer require manual approval. Production `SITE_URL` is [https://green-plant-0b0d20b00.6.azurestaticapps.net](https://green-plant-0b0d20b00.6.azurestaticapps.net), identity and deployment configuration are in place, and automatic application deployment is enabled. No teardown has been executed. Avoid using Azure Portal deletion concurrently with a lifecycle workflow; the concurrency guard only covers GitHub workflow executions.

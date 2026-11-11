@@ -5,6 +5,7 @@ import { uiPreviewPlugin } from "../dev/ui-preview-plugin.mjs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { randomUUID } from "node:crypto";
 
 test("UI sandbox seeds hosted sessions without login and isolates memory data", async () => {
   const cacheDir = await mkdtemp(join(tmpdir(), "bball-ui-test-"));
@@ -22,6 +23,27 @@ test("UI sandbox seeds hosted sessions without login and isolates memory data", 
     const setup = await json(`/api/v1/sessions/${data.setup.id}/snapshot`);
     assert.equal(setup.state.sessionStarted, false);
     assert.equal(setup.state.startingLineupsByQuarter[1].length, 5);
+    // Simulate a service dependency changing while the browser keeps its game.
+    // The next request must resolve a fresh service, not the seeded old instance.
+    let serviceLoads = 0;
+    const loadModule = server.ssrLoadModule.bind(server);
+    server.ssrLoadModule = async (...args) => {
+      if (args[0] === "/api/src/service.ts") serviceLoads++;
+      return loadModule(...args);
+    };
+    const module = server.moduleGraph.getModuleById(new URL("../api/src/service.ts", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"));
+    if (module) server.moduleGraph.invalidateModule(module);
+    const resetOperation = { operationId: randomUUID(), expectedRevision: game.session.revision, type: "game.reset", payload: { confirmed: true, possessionId: randomUUID(), stintId: randomUUID() } };
+    const writeReset = () => fetch(origin + `/api/v1/sessions/${data.session.id}/operations`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(resetOperation) });
+    assert.equal((await writeReset()).status, 200);
+    assert.equal((await writeReset()).status, 200);
+    const afterReset = await json(`/api/v1/sessions/${data.session.id}/snapshot`);
+    assert.equal(afterReset.session.revision, game.session.revision + 1);
+    assert.equal(afterReset.state.possessions.length, 1);
+    assert.deepEqual(afterReset.state.possessions[0].events, []);
+    assert.deepEqual(afterReset.state.roster, game.state.roster);
+    assert.equal((await json("/api/v1/me")).id, data.account.id);
+    assert.ok(serviceLoads >= 4, "Each API request must resolve the current SSR service");
     const blocked = await fetch(origin + "/__ui/reset", { method: "POST", headers: { Origin: "https://example.com" } });
     assert.equal(blocked.status, 403);
     const reset = await (await fetch(origin + "/__ui/reset", { method: "POST" })).json();

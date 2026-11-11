@@ -82,7 +82,69 @@ export function applyOperation(input: SessionState, raw: OperationInput, context
   const occupied = new Set([...state.roster.map(p => p.id), ...state.lineupStints.map(s => s.id), ...state.substitutions.map(s => s.id), ...state.possessions.flatMap(p => [p.id, ...p.events.map(e => e.id)])]);
   const fresh = (id: string) => { requireRule(!occupied.has(id), "Duplicate ID"); occupied.add(id); };
   const touch = (e: AuthoritativeEvent) => ({ ...e, updatedProvenance: provenance });
-  if (op.type === "context.replace") {
+  // One deletion can be undone; clock checkpoints alone do not expire it.
+  if (op.type !== "event.undo" && !(op.type === "context.replace" && Object.keys(op.payload).every(key => key === "clockSeconds" || key === "clockRunning"))) delete state.eventUndo;
+  if (op.type === "event.undo") {
+    const original = state.eventUndo;
+    requireRule(original, "No entry deletion available to undo");
+    const index = state.possessions.findIndex(p => p.id === original.id);
+    requireRule(index >= 0, "Deleted entry context changed");
+    const currentIds = new Set(state.possessions[index].events.map(e => e.id));
+    const missing = original.events.filter(e => !currentIds.has(e.id));
+    requireRule(missing.length === op.payload.eventIds.length, "Undo event IDs do not match deleted entries");
+    const replacements = new Map(missing.map((e, i) => [e.id, op.payload.eventIds[i]]));
+    op.payload.eventIds.forEach(fresh);
+    original.events = original.events.map(e => ({ ...e,
+      id: replacements.get(e.id) ?? e.id,
+      ...(e.linkedScoreId ? { linkedScoreId: replacements.get(e.linkedScoreId) ?? e.linkedScoreId } : {}),
+      ...(replacements.has(e.id) ? { provenance, updatedProvenance: provenance } : { updatedProvenance: provenance })
+    }));
+    state.possessions[index] = original;
+    delete state.eventUndo;
+    delete state.boundaryUndo;
+    return validateState(state);
+  }
+  if (op.type === "possession.boundary.delete") {
+    const index = state.possessions.findIndex(p => p.id === op.payload.possessionId);
+    const left = state.possessions[index], right = state.possessions[index + 1];
+    requireRule(left && right && left.completed && left.events.at(-1)?.id === op.payload.eventId, "Missing possession boundary");
+    requireRule(left.quarter === right.quarter, "Cannot merge possessions across quarters");
+    state.boundaryUndo = { left: structuredClone(left), right: structuredClone(right) };
+    const events = [...left.events.slice(0, -1), ...right.events];
+    const merged = { ...left, endClock: right.endClock, completed: right.completed, events,
+      passCount: typeof left.passCount === "number" && typeof right.passCount === "number" ? left.passCount + right.passCount : null,
+      hadPaintTouch: left.hadPaintTouch === true || right.hadPaintTouch === true ? true : left.hadPaintTouch === false && right.hadPaintTouch === false ? false : null,
+      wasFastBreak: left.wasFastBreak === true || right.wasFastBreak === true ? true : left.wasFastBreak === false && right.wasFastBreak === false ? false : null,
+      detailsEdited: false };
+    recalculate(merged);
+    state.possessions.splice(index, 2, merged);
+    state.currentSide = state.possessions.at(-1)!.side!;
+  } else if (op.type === "possession.boundary.undo") {
+    const undo = state.boundaryUndo;
+    requireRule(undo, "No possession deletion available to undo");
+    fresh(op.payload.endEventId); fresh(op.payload.nextPossessionId);
+    const index = state.possessions.findIndex(p => p.id === undo.left.id);
+    requireRule(index >= 0, "Deleted boundary context changed");
+    const left = undo.left, right = undo.right;
+    left.events[left.events.length - 1] = { ...left.events.at(-1)!, id: op.payload.endEventId, provenance } as AuthoritativeEvent;
+    right.id = op.payload.nextPossessionId;
+    state.possessions.splice(index, 1, left, right);
+    state.currentSide = state.possessions.at(-1)!.side!;
+    delete state.boundaryUndo;
+  } else if (op.type === "game.reset") {
+    requireRule(state.sessionStarted, "Session not started");
+    fresh(op.payload.possessionId); fresh(op.payload.stintId);
+    const starters = state.startingLineupsByQuarter[1];
+    requireRule(starters?.length === 5, "Reset requires the opening five");
+    state.onCourtLineup = [...starters];
+    state.startingLineupsByQuarter = { 1: [...starters] };
+    state.substitutions = [];
+    state.lineupStints = [{ id: op.payload.stintId, label: "Lineup 1", quarter: 1, startClock: "10:00", endClock: "10:00", lineupIds: [...starters] }];
+    state.possessions = [{ id: op.payload.possessionId, quarter: 1, startClock: "10:00", endClock: "10:00", lineupIds: [...starters], events: [], pointsFor: 0, pointsAgainst: 0, side: "offense", completed: false }];
+    state.clockSeconds = 600; state.clockRunning = false; state.currentSide = "offense";
+    delete state.boundaryUndo;
+  } else if (op.type === "context.replace") {
+    if (Object.keys(op.payload).some(key => key !== "clockSeconds" && key !== "clockRunning")) delete state.boundaryUndo;
     // No possessions accepted. Keep historical references/provenance intact.
     if (op.payload.lineupStints) {
       for (const old of state.lineupStints) {
@@ -98,22 +160,30 @@ export function applyOperation(input: SessionState, raw: OperationInput, context
     active.side = state.currentSide;
     if (!active.events.length) active.lineupIds = [...state.onCourtLineup];
   } else if (op.type === "possession.toggle") {
+    delete state.boundaryUndo;
     requireRule(state.sessionStarted, "Session not started");
     fresh(op.payload.endEventId); fresh(op.payload.nextPossessionId);
     const latestStint = state.lineupStints.at(-1)?.id;
     requireRule(latestStint === op.payload.lineupStintId && [...op.payload.lineupIds].sort().join("|") === [...state.onCourtLineup].sort().join("|"), "Stale toggle context");
-    const restored = undoEmptyPossessionToggle(state.possessions, op.payload.clock, latestStint);
+    const restored = op.payload.explicitSide ? null : undoEmptyPossessionToggle(state.possessions, op.payload.clock, latestStint);
     if (restored) {
       state.possessions = restored;
       state.currentSide = restored.at(-1)!.side!;
     } else {
       const active = state.possessions.at(-1)!;
+      if (op.payload.explicitSide) {
+        requireRule(active.side === op.payload.explicitSide || active.events.length === 0, "Cannot change side of a recorded possession");
+        active.side = op.payload.explicitSide;
+        active.explicitlyEnded = true;
+        state.currentSide = op.payload.explicitSide;
+      }
       active.endClock = op.payload.clock; active.completed = true;
       active.events.push({ id: op.payload.endEventId, type: "possession_end", playerId: "", clock: op.payload.clock, lineupStintId: latestStint, provenance } as AuthoritativeEvent);
       state.currentSide = state.currentSide === "offense" ? "defense" : "offense";
       state.possessions.push({ id: op.payload.nextPossessionId, quarter: active.quarter, startClock: op.payload.clock, endClock: op.payload.clock, lineupIds: [...op.payload.lineupIds], events: [], pointsFor: 0, pointsAgainst: 0, side: state.currentSide, completed: false });
     }
   } else {
+    delete state.boundaryUndo;
     const p = state.possessions.find(p => p.id === op.payload.possessionId);
     requireRule(p, "Unknown possession");
     if (op.type === "event.add") {
@@ -125,6 +195,7 @@ export function applyOperation(input: SessionState, raw: OperationInput, context
     } else if (op.type === "event.delete") {
       const event = p.events.find(e => e.id === op.payload.eventId);
       requireRule(event && event.type !== "possession_end", "Missing event or protected boundary");
+      state.eventUndo = structuredClone(p);
       p.events = p.events.filter(e => e.id !== event.id && e.linkedScoreId !== event.id).map(e => e.id === event.linkedScoreId ? touch({ ...e, assist: { status: "unknown" } } as AuthoritativeEvent) : e);
     } else if (op.type === "score.assist") {
       const score = p.events.find(e => e.id === op.payload.scoreId && e.type === "shot_made");

@@ -66,14 +66,6 @@ function SessionView({ account, game, competition, onExit, sync, onReload }: Pro
   const [clockReady, setClockReady] = useState(false);
   const secondsRef = useRef(seconds);
   const [nudge, setNudge] = useState(0);
-  const [chooseSide, setChooseSide] = useState(false);
-  const startSideDialog = useRef<HTMLDialogElement>(null);
-  useEffect(() => {
-    const dialog = startSideDialog.current;
-    if (!dialog) return;
-    if (chooseSide && !dialog.open) dialog.showModal();
-    else if (!chooseSide && dialog.open) dialog.close();
-  }, [chooseSide]);
   const [loadingDefaults, setLoadingDefaults] = useState(false);
   const state = sync.state;
   const active = state.possessions.at(-1)!;
@@ -150,6 +142,25 @@ function SessionView({ account, game, competition, onExit, sync, onReload }: Pro
     return command({ type: "context.replace", payload: { onCourtLineup: ids, lineupStints: stints, substitutions, clockSeconds: secondsRef.current,
       ...(opening ? { startingLineupsByQuarter: { ...state.startingLineupsByQuarter, 1: ids } } : {}) } });
   };
+  const deleteEntry = (possessionId: string, eventId: string) => {
+    const event = sync.state.possessions.find(p => p.id === possessionId)?.events.find(e => e.id === eventId);
+    return command({ type: event?.type === "possession_end" ? "possession.boundary.delete" : "event.delete", payload: { possessionId, eventId } });
+  };
+  const explicitEnd = (side: PossessionSide) => {
+    if (sync.state.currentSide !== side && sync.state.possessions.at(-1)!.events.length) return;
+    const id = sync.state.possessions.at(-1)!.id;
+    if (command({ type: "possession.toggle", payload: { clock: currentClock, lineupStintId: sync.state.lineupStints.at(-1)?.id,
+      lineupIds: sync.state.onCourtLineup, endEventId: crypto.randomUUID(), nextPossessionId: `pos-${sync.revision + 1}`, explicitSide: side } })) return id;
+  };
+  const undoDeletedEntry = () => {
+    const original = sync.state.eventUndo;
+    if (original) {
+      const current = sync.state.possessions.find(p => p.id === original.id);
+      const removed = original.events.filter(e => !current?.events.some(saved => saved.id === e.id));
+      return command({ type: "event.undo", payload: { eventIds: removed.map(() => crypto.randomUUID()) } });
+    }
+    return command({ type: "possession.boundary.undo", payload: { endEventId: crypto.randomUUID(), nextPossessionId: `pos-${sync.revision + 1}` } });
+  };
   const draftValid = draftRoster.every(p => p.name.trim() && Number.isInteger(p.number) && p.number >= 0 && p.number <= 999)
     && new Set(draftRoster.map(p => p.number)).size === draftRoster.length;
   const rosterValid = draftRoster.length >= 5 && draftValid && starters.length === 5;
@@ -207,10 +218,15 @@ function SessionView({ account, game, competition, onExit, sync, onReload }: Pro
         <section className="global-metrics">{([
           ["Score For", totalPointsFor(state.possessions), state.statistics.offense.shot_made], ["Score Against", totalPointsAgainst(state.possessions), state.statistics.defense.opp_score], ["Turnovers", totalTurnovers(state.possessions), state.statistics.offense.turnover], ["Offensive Rebounds", totalOffensiveRebounds(state.possessions), state.statistics.offense.offensive_rebound], ["Opposition Rebounds", totalOppositionRebounds(state.possessions), state.statistics.defense.opposition_rebound]
         ] as const).map(([label, value, enabled]) => enabled !== false ? <article key={label}><h3>{label}</h3><p>{value}</p></article> : null)}</section>
-        <section className="clock-panel" aria-label="Game clock and active possession"><div className="clock-time"><p className="clock-big">{currentClock}</p><span>Time</span></div><div className="active-possession"><strong className="possession-number">{state.possessions.length}</strong><span>Possession</span></div><div className="clock-buttons"><button type="button" className={`clock-toggle-btn ${state.clockRunning ? "is-stop" : "is-start"}${!state.clockRunning && nudge ? ` clock-nudge-${nudge % 2 ? "odd" : "even"}` : ""}`} onClick={() => { setNudge(0); if (state.clockRunning) checkpoint(false); else if (seconds === 600) setChooseSide(true); else checkpoint(true); }}>{state.clockRunning ? "Stop" : "Start"}</button>{[-1, 1].map(delta => <button type="button" key={delta} disabled={state.clockRunning || seconds + delta < 0 || seconds + delta > 3600} onClick={() => { const next = seconds + delta; if (command({ type: "context.replace", payload: { clockSeconds: next } })) { secondsRef.current = next; setSeconds(next); } }}>{delta === 1 ? "+1s" : "-1s"}</button>)}<button type="button" disabled={seconds !== 0} onClick={() => { if (command({ type: "context.replace", payload: { clockSeconds: 600, clockRunning: false } })) { secondsRef.current = 600; setSeconds(600); } }}>Reset 10:00</button></div></section>
+        <section className="clock-panel" aria-label="Game clock and active possession">
+          <div className="clock-time"><p className="clock-big">{currentClock}</p><span>Time</span></div>
+          <div className="active-possession"><strong className="possession-number">{state.possessions.length}</strong><span>Possession</span></div>
+          <div className="active-possession active-quarter"><strong className="possession-number">{active.quarter}</strong><span>Quarter</span></div>
+          <div className="clock-buttons"><button type="button" className={`clock-toggle-btn ${state.clockRunning ? "is-stop" : "is-start"}${!state.clockRunning && nudge ? ` clock-nudge-${nudge % 2 ? "odd" : "even"}` : ""}`} onClick={() => { setNudge(0); checkpoint(!state.clockRunning); }}>{state.clockRunning ? "Stop" : "Start"}</button>{[-1, 1].map(delta => <button type="button" key={delta} disabled={state.clockRunning || seconds + delta < 0 || seconds + delta > 3600} onClick={() => { const next = seconds + delta; if (command({ type: "context.replace", payload: { clockSeconds: next } })) { secondsRef.current = next; setSeconds(next); } }}>{delta === 1 ? "+1s" : "-1s"}</button>)}<button type="button" disabled={seconds !== 0} onClick={() => { if (command({ type: "context.replace", payload: { clockSeconds: 600, clockRunning: false } })) { secondsRef.current = 600; setSeconds(600); } }}>Reset 10:00</button></div>
+        </section>
         <nav className="candidate-nav"><NavLink to="/tagging">Tagging</NavLink><NavLink to="/substitutions">Substitutions</NavLink><NavLink to="/configuration">Configuration</NavLink><NavLink to="/matrix">Possession Matrix</NavLink><NavLink to="/lineups">Lineup Differential</NavLink><NavLink to="/individual">Individual Point Diff</NavLink></nav>
         <main className="candidate-stage"><Routes>
-          <Route path="/tagging" element={<CandidateConsole protectBoundaries players={state.roster} possessions={state.possessions} selectedPossession={active} onSelectPossession={setReviewId} onAddEvent={addEvent} onEndPossession={toggle} onChooseButtonSide={chooseButtonSide} onRecordButtonEvent={recordButtonEvent} onUpdateButtonAssist={updateButtonAssist} currentClock={currentClock} statistics={state.statistics} possessionSide={state.currentSide} onCourtLineup={state.onCourtLineup} onDeleteEvent={(possessionId, eventId) => command({ type: "event.delete", payload: { possessionId, eventId } })} onUpdateScoreAssist={assist} onUpdatePossessionDetails={(possessionId, data) => { command({ type: "possession.details", payload: { possessionId, data } }); }} />} />
+          <Route path="/tagging" element={<CandidateConsole key={state.lineupStints[0]?.id} canUndoBoundary={Boolean(state.boundaryUndo || state.eventUndo)} onUndoBoundary={undoDeletedEntry} onExplicitEnd={explicitEnd} players={state.roster} possessions={state.possessions} selectedPossession={active} onSelectPossession={setReviewId} onAddEvent={addEvent} onEndPossession={toggle} onChooseButtonSide={chooseButtonSide} onRecordButtonEvent={recordButtonEvent} onUpdateButtonAssist={updateButtonAssist} currentClock={currentClock} statistics={state.statistics} possessionSide={state.currentSide} onCourtLineup={state.onCourtLineup} onDeleteEvent={deleteEntry} onUpdateScoreAssist={assist} onUpdatePossessionDetails={(possessionId, data) => { command({ type: "possession.details", payload: { possessionId, data } }); }} />} />
           <Route path="/configuration" element={<ConfigurationTab players={state.roster} statistics={state.statistics} startingFive={state.startingLineupsByQuarter[1] ?? []} locked={state.clockRunning || seconds !== 600 || state.substitutions.length > 0 || state.possessions.some(p => p.events.length > 0)} onToggleStatistic={(side, key) => { command({ type: "context.replace", payload: { statistics: { ...state.statistics, [side]: { ...state.statistics[side], [key]: state.statistics[side][key] === false } } } }); }} onSaveStartingFive={ids => { lineup(ids, state.substitutions, true); }} />} />
           <Route path="/substitutions" element={<SubstitutionsTab players={state.roster} onCourtLineup={state.onCourtLineup} substitutions={state.substitutions} currentClock={currentClock} currentQuarter={active.quarter} onRecordSubstitutions={pairs => {
             const ids = state.onCourtLineup.map(id => pairs.find(p => p.playerOutId === id)?.playerInId ?? id);
@@ -223,20 +239,5 @@ function SessionView({ account, game, competition, onExit, sync, onReload }: Pro
         </Routes></main>
       </>}
     </fieldset>
-    <dialog ref={startSideDialog} className="modal-card start-side-dialog" aria-labelledby="start-side-title"
-      onCancel={() => setChooseSide(false)} onClose={() => setChooseSide(false)}
-      onClick={event => { if (event.target === event.currentTarget) {
-        const bounds = event.currentTarget.getBoundingClientRect();
-        if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) setChooseSide(false);
-      } }}>
-      <h3 id="start-side-title">Start at 10:00</h3>
-      <p className="panel-hint">Choose which side starts this possession.</p>
-      <div className="modal-actions start-side-actions">
-        {(["offense", "defense"] as const).map(side => <button type="button" key={side} disabled={sync.blocked}
-          onClick={() => { if (command({ type: "context.replace", payload: { currentSide: side, clockSeconds: secondsRef.current, clockRunning: true } })) setChooseSide(false); }}>
-          {side === "offense" ? "Offense" : "Defense"}
-        </button>)}
-      </div>
-    </dialog>
   </div>;
 }

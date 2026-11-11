@@ -159,6 +159,7 @@ function GameTracker({ game, competition, onExit }: { game: ScheduledGame; compe
     notes: game.notes
   });
   const [possessions, setPossessions] = useState<Possession[]>([createInitialPossession()]);
+  const [boundaryUndo, setBoundaryUndo] = useState<{ original: Possession[]; merged: Possession[] } | null>(null);
   const [selectedPossessionId, setSelectedPossessionId] = useState<string>("pos-01");
   const [onCourtLineup, setOnCourtLineup] = useState<string[]>([]);
   const [lineupStints, setLineupStints] = useState<LineupStint[]>([]);
@@ -167,7 +168,6 @@ function GameTracker({ game, competition, onExit }: { game: ScheduledGame; compe
   const [clockSeconds, setClockSeconds] = useState<number>(10 * 60);
   const [clockRunning, setClockRunning] = useState<boolean>(false);
   const [clockNudge, setClockNudge] = useState(0);
-  const [showStartSideModal, setShowStartSideModal] = useState<boolean>(false);
   const [initialPossessionSide, setInitialPossessionSide] = useState<"offense" | "defense">("offense");
   const [roster, setRoster] = useState<Player[]>(loadStoredRoster);
   const [pendingFocusPlayerId, setPendingFocusPlayerId] = useState<string | null>(null);
@@ -312,7 +312,22 @@ function GameTracker({ game, competition, onExit }: { game: ScheduledGame; compe
   };
 
   const deleteEvent = (possessionId: string, eventId: string) => {
-    setPossessions((current) => current.map((possession) => {
+    const index = possessions.findIndex(p => p.id === possessionId);
+    const left = possessions[index], right = possessions[index + 1];
+    if (left?.events.find(e => e.id === eventId)?.type === "possession_end") {
+      if (!right || left.quarter !== right.quarter) return false;
+      const merged = [...possessions];
+      merged.splice(index, 2, { ...left, endClock: right.endClock, completed: right.completed, events: [...left.events.filter(e => e.id !== eventId), ...right.events], pointsFor: left.pointsFor + right.pointsFor, pointsAgainst: left.pointsAgainst + right.pointsAgainst,
+        passCount: typeof left.passCount === "number" && typeof right.passCount === "number" ? left.passCount + right.passCount : null,
+        hadPaintTouch: left.hadPaintTouch === true || right.hadPaintTouch === true ? true : left.hadPaintTouch === false && right.hadPaintTouch === false ? false : null,
+        wasFastBreak: left.wasFastBreak === true || right.wasFastBreak === true ? true : left.wasFastBreak === false && right.wasFastBreak === false ? false : null, detailsEdited: false });
+      setBoundaryUndo({ original: possessions, merged }); setPossessions(merged);
+      setSelectedPossessionId(merged[merged.length - 1].id);
+      setInitialPossessionSide(merged[merged.length - 1].side ?? "offense");
+      return true;
+    }
+    if (!left?.events.some(event => event.id === eventId)) return false;
+    const updated = possessions.map((possession) => {
       if (possession.id !== possessionId) return possession;
       const event = possession.events.find((entry) => entry.id === eventId);
       if (!event) return possession;
@@ -323,17 +338,20 @@ function GameTracker({ game, competition, onExit }: { game: ScheduledGame; compe
         pointsFor: possession.pointsFor - (event.type === "shot_made" ? event.points ?? 2 : 0),
         pointsAgainst: possession.pointsAgainst - (event.type === "opp_score" ? event.points ?? 2 : 0)
       };
-    }));
+    });
+    setBoundaryUndo({ original: possessions, merged: updated });
+    setPossessions(updated);
+    return true;
   };
 
   const shiftClock = (deltaSeconds: number) => {
     setClockSeconds((current) => Math.max(0, current + deltaSeconds));
   };
 
-  const endPossession = (data: PossessionCloseData) => {
+  const endPossession = (data: PossessionCloseData, explicit = false) => {
     const active = possessions[possessions.length - 1];
     if (!active) return;
-    const restored = undoEmptyPossessionToggle(possessions, currentClock, lineupStints[lineupStints.length - 1]?.id);
+    const restored = explicit ? null : undoEmptyPossessionToggle(possessions, currentClock, lineupStints[lineupStints.length - 1]?.id);
     if (restored) {
       const reopened = restored[restored.length - 1];
       setPossessions(restored);
@@ -353,7 +371,7 @@ function GameTracker({ game, competition, onExit }: { game: ScheduledGame; compe
     };
     setPossessions((current) => [
       ...current.map((possession) => possession.id === active.id
-        ? { ...possession, endClock: currentClock, side, completed: true, events: [...possession.events, endEvent] }
+        ? { ...possession, endClock: currentClock, side, completed: true, explicitlyEnded: explicit, events: [...possession.events, endEvent] }
         : possession),
       {
         id: createdId,
@@ -397,6 +415,7 @@ function GameTracker({ game, competition, onExit }: { game: ScheduledGame; compe
   };
 
   const applyOnCourtLineup = (lineupIds: string[]) => {
+    setBoundaryUndo(null);
     const quarter = possessions[possessions.length - 1]?.quarter ?? 1;
     const id = `stint-${makeEventId()}`;
     setLineupStints((current) => changeLineup(current, lineupIds, quarter, currentClock, id));
@@ -447,21 +466,6 @@ function GameTracker({ game, competition, onExit }: { game: ScheduledGame; compe
 
     if (onCourtLineup.length !== 5) return;
 
-    if (clockSeconds === 10 * 60) {
-      setShowStartSideModal(true);
-      return;
-    }
-
-    setClockRunning(true);
-  };
-
-  const startClockWithSide = (side: "offense" | "defense") => {
-    setClockNudge(0);
-    if (onCourtLineup.length !== 5) return;
-    setInitialPossessionSide(side);
-    setPossessions((current) => current.map((possession, index) =>
-      index === current.length - 1 ? { ...possession, side } : possession));
-    setShowStartSideModal(false);
     setClockRunning(true);
   };
 
@@ -710,8 +714,12 @@ function GameTracker({ game, competition, onExit }: { game: ScheduledGame; compe
           <span>Time</span>
         </div>
         <div className="active-possession">
-          <strong className="possession-number">{possessions.length ? formatPossessionId(possessions[possessions.length - 1].id) : "None"}</strong>
+          <strong className="possession-number">{possessions.length ? formatPossessionId(possessions[possessions.length - 1].id, possessions) : "None"}</strong>
           <span>Possession</span>
+        </div>
+        <div className="active-possession active-quarter">
+          <strong className="possession-number">{possessions[possessions.length - 1]?.quarter ?? 1}</strong>
+          <span>Quarter</span>
         </div>
         <div className="clock-controls">
           <div className="clock-buttons">
@@ -756,23 +764,6 @@ function GameTracker({ game, competition, onExit }: { game: ScheduledGame; compe
         ) : null}
       </section>
 
-      {showStartSideModal ? (
-        <div className="modal-backdrop" role="presentation" onClick={() => setShowStartSideModal(false)}>
-          <div className="modal-card" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
-            <h3>Start at 10:00</h3>
-            <p className="panel-hint">Choose which side starts this possession.</p>
-            <div className="modal-actions start-side-actions">
-              <button type="button" onClick={() => startClockWithSide("offense")}>
-                Offense
-              </button>
-              <button type="button" onClick={() => startClockWithSide("defense")}>
-                Defense
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
       <nav className="candidate-nav">
         <NavLink to="/tagging" end>
           Tagging
@@ -790,6 +781,12 @@ function GameTracker({ game, competition, onExit }: { game: ScheduledGame; compe
             path="/tagging"
             element={
               <CandidateConsole
+                canUndoBoundary={Boolean(boundaryUndo && boundaryUndo.merged === possessions)}
+                onUndoBoundary={() => {
+                  if (!boundaryUndo || boundaryUndo.merged !== possessions) return false;
+                  setPossessions(boundaryUndo.original); setSelectedPossessionId(boundaryUndo.original[boundaryUndo.original.length - 1].id);
+                  setInitialPossessionSide(boundaryUndo.original[boundaryUndo.original.length - 1].side ?? "offense"); setBoundaryUndo(null); return true;
+                }}
                 statistics={statistics}
                 players={roster}
                 possessions={possessions}
@@ -798,6 +795,12 @@ function GameTracker({ game, competition, onExit }: { game: ScheduledGame; compe
                 onAddEvent={addEvent}
                 onEndPossession={endPossession}
                 onChooseButtonSide={(side) => Boolean(chooseButtonSide(side))}
+                onExplicitEnd={(side) => {
+                  const active = possessions[possessions.length - 1];
+                  if (active.events.length && active.side !== side) return;
+                  endPossession({ side }, true);
+                  return active.id;
+                }}
                 onRecordButtonEvent={recordButtonEvent}
                 onUpdateButtonAssist={(scoreId, assist) => {
                   if (assist.status === "player" && !onCourtLineup.includes(assist.playerId)) return;

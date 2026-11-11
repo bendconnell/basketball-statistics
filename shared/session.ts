@@ -47,11 +47,13 @@ const possessionSchema = z.object({
   id: idSchema, quarter, startClock: clockSchema, endClock: clockSchema, lineupIds: lineup,
   events: z.array(eventSchema).max(5000), pointsFor: z.number().int().min(0).max(15000), pointsAgainst: z.number().int().min(0).max(15000),
   passCount: details.shape.passCount, hadPaintTouch: details.shape.paintTouch, wasFastBreak: details.shape.fastBreak,
-  side: z.enum(["offense", "defense"]).optional(), completed: z.boolean().optional(), detailsEdited: z.boolean().optional()
+  side: z.enum(["offense", "defense"]).optional(), completed: z.boolean().optional(), explicitlyEnded: z.boolean().optional(), detailsEdited: z.boolean().optional()
 }).strict();
-export const sessionStateSchema = contextSchema.extend({ possessions: z.array(possessionSchema).min(1).max(2000) }).strict();
+export const sessionStateSchema = contextSchema.extend({ possessions: z.array(possessionSchema).min(1).max(2000), boundaryUndo: z.object({ left: possessionSchema, right: possessionSchema }).strict().optional(), eventUndo: possessionSchema.optional() }).strict();
 export type SessionState = {
   sessionStarted: boolean;
+  boundaryUndo?: { left: Possession; right: Possession };
+  eventUndo?: Possession;
   gameDetails: z.infer<typeof gameDetailsSchema>;
   roster: Player[]; possessions: Possession[]; onCourtLineup: string[]; lineupStints: LineupStint[];
   startingLineupsByQuarter: Record<number, string[]>; substitutions: SubstitutionEvent[];
@@ -68,12 +70,16 @@ export type LoadedSession = { session: SessionMetadata; state: SessionState };
 export type SessionMember = { sessionId: string; userId: string; role: "master" | "contributor"; enabled: boolean };
 const envelope = { operationId: z.string().uuid(), expectedRevision: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER - 1) };
 export const operationInputSchema = z.discriminatedUnion("type", [
+  z.object({ ...envelope, type: z.literal("possession.boundary.delete"), payload: z.object({ possessionId: idSchema, eventId: idSchema }).strict() }).strict(),
+  z.object({ ...envelope, type: z.literal("possession.boundary.undo"), payload: z.object({ endEventId: idSchema, nextPossessionId: idSchema }).strict() }).strict(),
+  z.object({ ...envelope, type: z.literal("game.reset"), payload: z.object({ confirmed: z.literal(true), possessionId: idSchema, stintId: idSchema }).strict() }).strict(),
   z.object({ ...envelope, type: z.literal("event.add"), payload: z.object({ possessionId: idSchema, event: eventDraftSchema }).strict() }).strict(),
   z.object({ ...envelope, type: z.literal("event.delete"), payload: z.object({ possessionId: idSchema, eventId: idSchema }).strict() }).strict(),
+  z.object({ ...envelope, type: z.literal("event.undo"), payload: z.object({ eventIds: z.array(idSchema).min(1).max(2) }).strict() }).strict(),
   z.object({ ...envelope, type: z.literal("score.assist"), payload: z.object({ possessionId: idSchema, scoreId: idSchema, assist: scoreAssistSchema, assistEventId: idSchema }).strict() }).strict(),
   z.object({ ...envelope, type: z.literal("possession.details"), payload: z.object({ possessionId: idSchema, data: details }).strict() }).strict(),
   z.object({ ...envelope, type: z.literal("context.replace"), payload: contextSchema.partial().strict().refine(v => Object.keys(v).length > 0, "Empty context") }).strict(),
-  z.object({ ...envelope, type: z.literal("possession.toggle"), payload: z.object({ clock: clockSchema, lineupStintId: idSchema.optional(), lineupIds: lineup, endEventId: idSchema, nextPossessionId: idSchema }).strict() }).strict()
+  z.object({ ...envelope, type: z.literal("possession.toggle"), payload: z.object({ clock: clockSchema, lineupStintId: idSchema.optional(), lineupIds: lineup, endEventId: idSchema, nextPossessionId: idSchema, explicitSide: z.enum(["offense", "defense"]).optional() }).strict() }).strict()
 ]);
 export type OperationInput = z.infer<typeof operationInputSchema>;
 export function parseOperation(input: unknown): OperationInput {

@@ -19,16 +19,7 @@ export function getPlayerName(players: Player[], playerId: string): string {
   return players.find((player) => player.id === playerId)?.name ?? "Unknown";
 }
 
-export function formatPossessionId(possessionId: string): string {
-  const match = possessionId.match(/pos-(\d+)/i);
-  if (!match) {
-    return possessionId;
-  }
-
-  const value = Number(match[1]);
-  if (Number.isNaN(value)) {
-    return possessionId;
-  }
-
-  return String(value).padStart(2, "0");
+export function formatPossessionId(possessionId: string, possessions: Pick<Possession, "id">[]): string {
+  const index = possessions.findIndex(possession => possession.id === possessionId);
+  return index < 0 ? "Unknown" : String(index + 1).padStart(2, "0");
 }
